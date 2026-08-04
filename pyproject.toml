@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "realsense-humanego"
+version = "0.1.0"
+description = "Native D435i to HumanEgo compatibility bridge"
+requires-python = ">=3.8"
+dependencies = ["numpy>=1.20", "opencv-python>=4.5"]
+
+[project.optional-dependencies]
+hands = ["mediapipe>=0.10.8"]
+test = ["pytest>=7"]
+
+[project.scripts]
+realsense-humanego = "realsense_humanego.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["realsense_humanego*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

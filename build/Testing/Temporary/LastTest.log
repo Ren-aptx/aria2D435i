@@ -1,0 +1,56 @@
+Start testing: Aug 04 17:18 JST
+----------------------------------------------------------
+1/1 Testing: orb_settings_pinhole_smoke
+1/1 Test: orb_settings_pinhole_smoke
+Command: "/home/tenda/aria2D435i/build/ORBSettingsSmoke" "/home/tenda/aria2D435i/tests/fixtures/orbslam3_pinhole.yaml"
+Directory: /home/tenda/aria2D435i/build
+"orb_settings_pinhole_smoke" start time: Aug 04 17:18 JST
+Output:
+----------------------------------------------------------
+Loading settings from /home/tenda/aria2D435i/tests/fixtures/orbslam3_pinhole.yaml
+Camera1.k1 optional parameter does not exist...
+	-Loaded camera 1
+Camera2.k1 optional parameter does not exist...
+	-Loaded camera 2
+Camera.newHeight optional parameter does not exist...
+Camera.newWidth optional parameter does not exist...
+	-Loaded image info
+	-Loaded IMU calibration
+	-Loaded ORB settings
+Viewer.imageViewScale optional parameter does not exist...
+	-Loaded viewer settings
+System.LoadAtlasFromFile optional parameter does not exist...
+System.SaveAtlasToFile optional parameter does not exist...
+	-Loaded Atlas settings
+System.thFarPoints optional parameter does not exist...
+	-Loaded misc parameters
+	-Computed rectification maps
+----------------------------------
+SLAM settings: 
+	-Camera 1 parameters (Pinhole): [ 429.474 429.474 421.159 241.152 ]
+	-Camera 2 parameters (Pinhole: [ 429.474 429.474 421.159 241.152 ]
+	-Original image size: [ 848 , 480 ]
+	-Current image size: [ 848 , 480 ]
+	-Camera 1 parameters after rectification: [  429.474 429.474 421.159 241.152 ]
+	-Sequence FPS: 30
+	-Stereo baseline: 0.0503078
+	-Stereo depth threshold : 40
+	-Gyro noise: 0.001
+	-Accelerometer noise: 0.01
+	-Gyro walk: 1e-06
+	-Accelerometer walk: 0.0001
+	-IMU frequency: 200
+	-Features per image: 1500
+	-ORB scale factor: 1.2
+	-ORB number of scales: 8
+	-Initial FAST threshold: 20
+	-Min FAST threshold: 7
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"orb_settings_pinhole_smoke" end time: Aug 04 17:18 JST
+"orb_settings_pinhole_smoke" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Aug 04 17:18 JST

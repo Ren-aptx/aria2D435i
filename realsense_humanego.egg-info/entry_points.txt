@@ -1,0 +1,2 @@
+[console_scripts]
+realsense-humanego = realsense_humanego.cli:main

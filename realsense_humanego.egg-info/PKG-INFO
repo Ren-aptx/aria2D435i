@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: realsense-humanego
+Version: 0.1.0
+Summary: Native D435i to HumanEgo compatibility bridge
+Requires-Python: >=3.8
+Requires-Dist: numpy>=1.20
+Requires-Dist: opencv-python>=4.5
+Provides-Extra: hands
+Requires-Dist: mediapipe>=0.10; extra == "hands"
+Provides-Extra: test
+Requires-Dist: pytest>=7; extra == "test"

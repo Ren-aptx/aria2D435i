@@ -5,7 +5,13 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from realsense_humanego.exporter import ExportConfig, export_session
+from realsense_humanego.exporter import (
+    ExportConfig,
+    ExportFrame,
+    SourceFrame,
+    _phase_modes,
+    export_session,
+)
 
 
 def _write_fixture(session: Path):
@@ -65,3 +71,23 @@ def test_export_session_writes_humanego_contract_and_drops_invalid_pose(tmp_path
     assert np.isclose(camera["c2w"][0][3], 0.1)
     hands = json.loads((frame / "aria_hands.json").read_text(encoding="utf-8"))
     assert hands["hand_l"] is None and hands["hand_r"] is None
+
+
+def test_phase_modes_use_optimized_hand_motion_for_transition():
+    source = SourceFrame(0, 0, 0, Path("rgb.png"), Path("depth.png"))
+    frames = [
+        ExportFrame(index, source, np.eye(4), np.zeros(3), np.zeros(3))
+        for index in range(9)
+    ]
+    documents = []
+    for index in range(9):
+        speed = 0.3 if index < 2 else 0.0
+        documents.append({
+            "hand_r": {"midpoint_lin_vel_opt_world": [speed, 0.0, 0.0]},
+            "hand_l": None,
+        })
+    config = ExportConfig(
+        session=Path("."), finish_frames=0, hand_stable_frames=2,
+        hand_transition_frames=0,
+    )
+    assert _phase_modes(frames, config, documents) == [3, 3, 0, 0, 0, 0, 0, 0, 0]

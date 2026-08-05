@@ -68,6 +68,7 @@ set(CMAKE_MAKEFILE_PRODUCTS
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
+  "CMakeFiles/ORBSettingsCompat.dir/DependInfo.cmake"
   "CMakeFiles/RealSenseStereoInertial.dir/DependInfo.cmake"
   "CMakeFiles/Experimental.dir/DependInfo.cmake"
   "CMakeFiles/Nightly.dir/DependInfo.cmake"

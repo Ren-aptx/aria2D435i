@@ -1,2 +1,2 @@
-orb_settings_pinhole_smoke 9 0.00457829
+orb_system_d435i_rectified_settings_smoke 5 0.426188
 ---

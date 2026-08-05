@@ -88,21 +88,26 @@ ORBSettingsSmoke_OBJECTS = \
 "CMakeFiles/ORBSettingsSmoke.dir/tests/orb_settings_smoke.cc.o"
 
 # External object files for target ORBSettingsSmoke
-ORBSettingsSmoke_EXTERNAL_OBJECTS =
+ORBSettingsSmoke_EXTERNAL_OBJECTS = \
+"/home/tenda/aria2D435i/build/CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.o"
 
 ORBSettingsSmoke: CMakeFiles/ORBSettingsSmoke.dir/tests/orb_settings_smoke.cc.o
+ORBSettingsSmoke: CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.o
 ORBSettingsSmoke: CMakeFiles/ORBSettingsSmoke.dir/build.make
 ORBSettingsSmoke: /home/tenda/ORB_SLAM3/lib/libORB_SLAM3.so
 ORBSettingsSmoke: /home/tenda/ORB_SLAM3/Thirdparty/DBoW2/lib/libDBoW2.so
 ORBSettingsSmoke: /home/tenda/ORB_SLAM3/Thirdparty/g2o/lib/libg2o.so
 ORBSettingsSmoke: /usr/lib/x86_64-linux-gnu/libopencv_imgcodecs.so.4.5.4d
+ORBSettingsSmoke: /usr/lib/x86_64-linux-gnu/libopencv_calib3d.so.4.5.4d
 ORBSettingsSmoke: /usr/local/lib/libpango_glgeometry.so.0.9.5
 ORBSettingsSmoke: /usr/local/lib/libpango_python.so.0.9.5
 ORBSettingsSmoke: /usr/local/lib/libpango_scene.so.0.9.5
 ORBSettingsSmoke: /usr/local/lib/libpango_tools.so.0.9.5
 ORBSettingsSmoke: /usr/local/lib/libpango_video.so.0.9.5
 ORBSettingsSmoke: /opt/ros/humble/lib/x86_64-linux-gnu/librealsense2.so.2.58.2
+ORBSettingsSmoke: /usr/lib/x86_64-linux-gnu/libopencv_features2d.so.4.5.4d
 ORBSettingsSmoke: /usr/lib/x86_64-linux-gnu/libopencv_imgproc.so.4.5.4d
+ORBSettingsSmoke: /usr/lib/x86_64-linux-gnu/libopencv_flann.so.4.5.4d
 ORBSettingsSmoke: /usr/lib/x86_64-linux-gnu/libopencv_core.so.4.5.4d
 ORBSettingsSmoke: /usr/local/lib/libpango_geometry.so.0.9.5
 ORBSettingsSmoke: /usr/local/lib/libtinyobj.so.0.9.5

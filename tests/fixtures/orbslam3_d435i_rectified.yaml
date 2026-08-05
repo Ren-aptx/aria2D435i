@@ -1,20 +1,12 @@
 %YAML:1.0
 ---
 File.version: "1.0"
-Camera.type: "PinHole"
+Camera.type: "Rectified"
 Camera1.fx: 429.4736023
 Camera1.fy: 429.4736023
 Camera1.cx: 421.1586914
 Camera1.cy: 241.1521301
-Camera2.fx: 429.4736023
-Camera2.fy: 429.4736023
-Camera2.cx: 421.1586914
-Camera2.cy: 241.1521301
-Stereo.T_c1_c2: !!opencv-matrix
-   rows: 4
-   cols: 4
-   dt: f
-   data: [1, 0, 0, 0.0503077656, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+Stereo.b: 0.0503077656
 Camera.width: 848
 Camera.height: 480
 Camera.fps: 30
@@ -46,4 +38,3 @@ Viewer.ViewpointX: 0.0
 Viewer.ViewpointY: -0.7
 Viewer.ViewpointZ: -3.5
 Viewer.ViewpointF: 500.0
-

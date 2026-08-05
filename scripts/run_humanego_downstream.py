@@ -12,11 +12,34 @@ import sys
 from pathlib import Path
 import os
 
+import cv2
+import numpy as np
+
 
 STAGES = (
     "dinosam", "kptsselector", "cotracker", "camtriangulator",
     "lama", "visualkpts", "datasetgen",
 )
+
+_RESULT_PRODUCERS = {
+    "kptsselector_results.json": "kptsselector",
+    "cotracker_results.json": "cotracker",
+    "camtriangulator_results.json": "camtriangulator",
+}
+
+
+def clear_invalidated_results(session: Path, from_stage: str) -> list[Path]:
+    """Remove cached results invalidated by a resumed upstream stage."""
+    start = STAGES.index(from_stage)
+    removed = []
+    preprocess = Path(session) / "preprocess"
+    for filename, producer in _RESULT_PRODUCERS.items():
+        if start <= STAGES.index(producer):
+            path = preprocess / filename
+            if path.is_file():
+                path.unlink()
+                removed.append(path)
+    return removed
 
 
 def parser() -> argparse.ArgumentParser:
@@ -36,6 +59,10 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--video", action="store_true", help="export HumanEgo diagnostics")
     result.add_argument("--gif", action="store_true")
+    result.add_argument(
+        "--keep-stage-cache", action="store_true",
+        help="keep cached stage JSON even when rerunning an upstream stage",
+    )
     return result
 
 
@@ -43,10 +70,10 @@ def main(argv=None) -> int:
     args = parser().parse_args(argv)
     humanego = args.humanego.resolve()
     session = args.session.resolve()
-    os.chdir(humanego)
-    cfg = args.cfg if args.cfg.is_absolute() else humanego / args.cfg
     if not humanego.is_dir():
         raise FileNotFoundError(humanego)
+    os.chdir(humanego)
+    cfg = args.cfg if args.cfg.is_absolute() else humanego / args.cfg
     all_data = session / "preprocess" / "all_data"
     frame_dirs = sorted(
         path for path in all_data.iterdir()
@@ -68,6 +95,12 @@ def main(argv=None) -> int:
     sys.path.insert(0, str(humanego))
     from preprocess.CoTrackerOffline import reset_cotracker_offline
     from preprocess.Preprocess import Preprocess
+    from preprocess.OrientAnything import (
+        estimate_frame_pca1,
+        estimate_frame_pca2,
+        estimate_frame_vlm,
+        get_crop_from_2d_kpts,
+    )
     from preprocess.VisualKpts import reset_visualkpts
     from utils.utils_io import load_cfg_dynamic_task
 
@@ -93,6 +126,38 @@ def main(argv=None) -> int:
     start, end = STAGES.index(args.from_stage), STAGES.index(args.to_stage)
     if start > end:
         raise ValueError("--from-stage must not come after --to-stage")
+    if not args.keep_stage_cache:
+        for path in clear_invalidated_results(session, args.from_stage):
+            print(f"[RealSense bridge] removed stale result: {path}")
+
+    def humanego_pose_estimator(
+        method, points_cam, is_anchor, anchor_center_cam, image_path, mask_path
+    ):
+        common = {
+            "is_anchor": is_anchor,
+            "anchor_center_cam": anchor_center_cam,
+        }
+        if method == "pca1":
+            return estimate_frame_pca1(pts_cam=points_cam, **common)
+        if method == "pca2":
+            return estimate_frame_pca2(pts_cam=points_cam, **common)
+        if method == "vlm":
+            image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+            if image is None or mask is None:
+                raise ValueError(f"cannot build VLM crop from {image_path} / {mask_path}")
+            y, x = np.nonzero(mask > 0)
+            if x.size == 0:
+                raise ValueError(f"empty object mask: {mask_path}")
+            crop = get_crop_from_2d_kpts(image, np.column_stack([x, y]))
+            return estimate_frame_vlm(
+                image=crop,
+                t_cam=np.mean(points_cam, axis=0),
+                do_rm_bkg=True,
+                **common,
+            )
+        raise ValueError(f"unsupported HumanEgo pose_method: {method!r}")
+
     methods = {
         "dinosam": engine.preprocess_dinosam,
         "kptsselector": engine.preprocess_kptsselector,
@@ -102,17 +167,20 @@ def main(argv=None) -> int:
         "visualkpts": engine.preprocess_visualkpts,
         "datasetgen": engine.preprocess_datasetgen,
     }
-    rgbd_pose_done = False
     for stage in STAGES[start:end + 1]:
-        if args.object_pose == "rgbd" and stage in {
-            "kptsselector", "cotracker", "camtriangulator"
-        }:
-            if not rgbd_pose_done:
-                print("[RealSense bridge] HumanEgo stage: rgbd_object_pose")
-                generate_rgbd_object_poses(
-                    session, [Path(path) for path in engine.object_centric_image_list]
-                )
-                rgbd_pose_done = True
+        if args.object_pose == "rgbd" and stage == "camtriangulator":
+            print("[RealSense bridge] HumanEgo stage: rgbd_object_pose")
+            camtriangulator_cfg = getattr(engine.cfg, "CamTriangulator", {})
+            if hasattr(camtriangulator_cfg, "get"):
+                pose_methods = camtriangulator_cfg.get("pose_method", "pca1")
+            else:
+                pose_methods = getattr(camtriangulator_cfg, "pose_method", "pca1")
+            generate_rgbd_object_poses(
+                session,
+                [Path(path) for path in engine.object_centric_image_list],
+                pose_methods=pose_methods,
+                pose_estimator=humanego_pose_estimator,
+            )
             continue
         print(f"[RealSense bridge] HumanEgo stage: {stage}")
         methods[stage]()

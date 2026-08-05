@@ -20,7 +20,12 @@ from .geometry import (
     rotation_angle,
     rotation_to_rpy_zyx,
 )
-from .hands import DetectedHand, HandProcessor, MediaPipeDetector
+from .hands import (
+    DetectedHand,
+    HandProcessor,
+    MediaPipeDetector,
+    optimize_hand_sequence,
+)
 
 
 @dataclass
@@ -35,6 +40,17 @@ class ExportConfig:
     grasp_smooth_window: int = 5
     depth_patch_radius: int = 3
     min_valid_depth_pixels: int = 4
+    min_depth_joints: int = 8
+    min_palm_depth_joints: int = 3
+    hand_confidence_threshold: float = 0.3
+    hand_min_segment_frames: int = 6
+    hand_interp_max_gap: int = 10
+    hand_smooth_window: int = 21
+    hand_smooth_polyorder: int = 2
+    hand_ema_alpha: float = 0.15
+    hand_motion_mps: float = 0.15
+    hand_stable_frames: int = 5
+    hand_transition_frames: int = 10
     finish_frames: int = 60
     stop_linear_mps: float = 0.04
     stop_angular_rps: float = 0.15
@@ -194,13 +210,18 @@ def _calculate_kinematics(frames: List[ExportFrame]) -> None:
         frame.yaw_unwrapped_rad = float(yaw)
 
 
-def _phase_modes(frames: List[ExportFrame], config: ExportConfig) -> List[int]:
+def _phase_modes(
+    frames: List[ExportFrame],
+    config: ExportConfig,
+    hand_documents: Optional[List[Dict]] = None,
+) -> List[int]:
+    stopped_flags = np.asarray([
+        frame.linear_speed < config.stop_linear_mps
+        and frame.angular_speed < config.stop_angular_rps
+        for frame in frames
+    ], dtype=bool)
     modes: List[int] = []
-    for frame in frames:
-        stopped = (
-            frame.linear_speed < config.stop_linear_mps
-            and frame.angular_speed < config.stop_angular_rps
-        )
+    for frame, stopped in zip(frames, stopped_flags):
         if stopped:
             modes.append(0)
         elif (frame.angular_speed >= config.rotate_angular_rps
@@ -208,14 +229,62 @@ def _phase_modes(frames: List[ExportFrame], config: ExportConfig) -> List[int]:
             modes.append(2)
         else:
             modes.append(1)
-    # Match HumanEgo's terminal convention, but only label an actual final stopped run.
+
+    # Match HumanEgo's hand-kinematic cleanup: a camera stop becomes manipulation
+    # only after a hand has settled; reach/withdrawal portions are transitions.
+    if hand_documents is not None:
+        for start, end in _continuous_true_runs(stopped_flags):
+            speeds = np.full(end - start, np.inf, dtype=np.float64)
+            for local_index, document in enumerate(hand_documents[start:end]):
+                active = []
+                for side in ("hand_r", "hand_l"):
+                    hand = document.get(side)
+                    velocity = None if hand is None else hand.get(
+                        "midpoint_lin_vel_opt_world"
+                    )
+                    if velocity is not None:
+                        active.append(float(np.linalg.norm(velocity)))
+                if active:
+                    speeds[local_index] = max(active)
+            stable = speeds < config.hand_motion_mps
+            width = max(1, config.hand_stable_frames)
+            stable_windows = [
+                index for index in range(0, max(0, len(stable) - width + 1))
+                if bool(np.all(stable[index:index + width]))
+            ]
+            if not stable_windows:
+                modes[start:end] = [3] * (end - start)
+                continue
+            first_stable = stable_windows[0]
+            last_stable = stable_windows[-1] + width - 1
+            entry_end = min(end, start + first_stable + config.hand_transition_frames)
+            exit_start = max(start, start + last_stable + 1 - config.hand_transition_frames)
+            for index in range(start, entry_end):
+                modes[index] = 3
+            for index in range(exit_start, end):
+                modes[index] = 3
+
+    # Match HumanEgo's terminal convention using the actual camera stop mask.
     tail_start = len(modes)
-    while tail_start > 0 and modes[tail_start - 1] == 0:
+    while tail_start > 0 and stopped_flags[tail_start - 1]:
         tail_start -= 1
     finish_start = max(tail_start, len(modes) - max(0, config.finish_frames))
     for index in range(finish_start, len(modes)):
         modes[index] = 4
     return modes
+
+
+def _continuous_true_runs(values: np.ndarray) -> List[Tuple[int, int]]:
+    result: List[Tuple[int, int]] = []
+    start = None
+    for index in range(len(values) + 1):
+        active = index < len(values) and bool(values[index])
+        if active and start is None:
+            start = index
+        elif not active and start is not None:
+            result.append((start, index))
+            start = None
+    return result
 
 
 def _select_hand_source(config: ExportConfig):
@@ -276,8 +345,6 @@ def export_session(config: ExportConfig) -> Dict:
     fps = int(round(1.0 / median_dt)) if median_dt > 0 else 30
     fps = max(1, fps)
     fov = math.degrees(2.0 * math.atan(float(color["height"]) / (2.0 * intrinsics[1, 1])))
-    phases = _phase_modes(frames, config)
-
     hand_source, detector = _select_hand_source(config)
     hand_processor = HandProcessor(
         close_ratio=config.close_ratio,
@@ -285,6 +352,8 @@ def export_session(config: ExportConfig) -> Dict:
         smooth_window=config.grasp_smooth_window,
         patch_radius=config.depth_patch_radius,
         min_valid_pixels=config.min_valid_depth_pixels,
+        min_depth_joints=config.min_depth_joints,
+        min_palm_depth_joints=config.min_palm_depth_joints,
     )
 
     preprocess = session / "preprocess"
@@ -293,10 +362,10 @@ def export_session(config: ExportConfig) -> Dict:
     first_t = frames[0].t_world
     first_rpy_deg = np.degrees(frames[0].rpy_rad)
     mode_names = {0: "STOP", 1: "FORWARD", 2: "ROTATE", 3: "TRANSITION", 4: "FINISHED"}
-    hand_counts = {"left": 0, "right": 0}
+    hand_documents: List[Dict] = []
 
     try:
-        for frame, mode in zip(frames, phases):
+        for frame in frames:
             frame_dir = all_data / f"{frame.idx:05d}"
             frame_dir.mkdir(parents=True, exist_ok=True)
             rgb_target = frame_dir / "rgb.png"
@@ -349,16 +418,6 @@ def export_session(config: ExportConfig) -> Dict:
                 "tracking_valid": True,
             }
             _json_dump(frame_dir / "aria_slam.json", slam_document)
-            _json_dump(frame_dir / "aria_phases.json", {
-                "idx": frame.idx,
-                "ts": frame.source.rgb_timestamp_ns,
-                "stop": int(mode in {0, 4}),
-                "mode": mode,
-                "mode_str": mode_names[mode],
-                "linear_speed_mps": frame.linear_speed,
-                "angular_speed_rps": frame.angular_speed,
-                "yaw_unwrapped_deg": math.degrees(frame.yaw_unwrapped_rad),
-            })
 
             image = cv2.imread(str(rgb_target), cv2.IMREAD_COLOR)
             depth_raw = cv2.imread(str(depth_target), cv2.IMREAD_UNCHANGED)
@@ -376,9 +435,7 @@ def export_session(config: ExportConfig) -> Dict:
                 detections, depth_m, intrinsics, frame.c2w,
                 frame.source.rgb_timestamp_ns * 1e-9,
             )
-            hand_counts["right"] += int(hands["hand_r"] is not None)
-            hand_counts["left"] += int(hands["hand_l"] is not None)
-            _json_dump(frame_dir / "aria_hands.json", {
+            hand_documents.append({
                 "idx": frame.idx,
                 "ts": frame.source.rgb_timestamp_ns,
                 "hand_r": hands["hand_r"],
@@ -387,6 +444,39 @@ def export_session(config: ExportConfig) -> Dict:
     finally:
         if detector is not None:
             detector.close()
+
+    optimization_stats = optimize_hand_sequence(
+        hand_documents,
+        timestamps.astype(np.float64) * 1e-9,
+        confidence_threshold=config.hand_confidence_threshold,
+        min_segment_frames=config.hand_min_segment_frames,
+        fill_max_gap=config.hand_interp_max_gap,
+        smooth_window=config.hand_smooth_window,
+        smooth_polyorder=config.hand_smooth_polyorder,
+        ema_alpha=config.hand_ema_alpha,
+    )
+    phases = _phase_modes(frames, config, hand_documents)
+    hand_counts = {
+        "right": sum(document["hand_r"] is not None for document in hand_documents),
+        "left": sum(document["hand_l"] is not None for document in hand_documents),
+    }
+    for frame, mode, hands_document in zip(frames, phases, hand_documents):
+        frame_dir = all_data / f"{frame.idx:05d}"
+        _json_dump(frame_dir / "aria_hands.json", hands_document)
+        camera_stopped = (
+            frame.linear_speed < config.stop_linear_mps
+            and frame.angular_speed < config.stop_angular_rps
+        )
+        _json_dump(frame_dir / "aria_phases.json", {
+            "idx": frame.idx,
+            "ts": frame.source.rgb_timestamp_ns,
+            "stop": int(camera_stopped),
+            "mode": mode,
+            "mode_str": mode_names[mode],
+            "linear_speed_mps": frame.linear_speed,
+            "angular_speed_rps": frame.angular_speed,
+            "yaw_unwrapped_deg": math.degrees(frame.yaw_unwrapped_rad),
+        })
 
     _json_dump(preprocess / "aria_cam_rgb_config.json", {
         "total_frames": len(frames),
@@ -416,6 +506,7 @@ def export_session(config: ExportConfig) -> Dict:
         "trajectory": str(trajectory_path.resolve()),
         "hand_source": hand_source,
         "hand_observations": hand_counts,
+        "hand_optimization": optimization_stats,
     }
     _json_dump(preprocess / "realsense_manifest.json", manifest)
     return manifest

@@ -1,3 +1,4 @@
+/home/tenda/aria2D435i/build/CMakeFiles/ORBSettingsCompat.dir
 /home/tenda/aria2D435i/build/CMakeFiles/RealSenseStereoInertial.dir
 /home/tenda/aria2D435i/build/CMakeFiles/Experimental.dir
 /home/tenda/aria2D435i/build/CMakeFiles/Nightly.dir

@@ -127,6 +127,19 @@ depend:
 .PHONY : depend
 
 #=============================================================================
+# Target rules for targets named ORBSettingsCompat
+
+# Build rule for target.
+ORBSettingsCompat: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 ORBSettingsCompat
+.PHONY : ORBSettingsCompat
+
+# fast build rule for target.
+ORBSettingsCompat/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/build
+.PHONY : ORBSettingsCompat/fast
+
+#=============================================================================
 # Target rules for targets named RealSenseStereoInertial
 
 # Build rule for target.
@@ -540,6 +553,30 @@ cpp/RealSenseStereoInertial.cc.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/cpp/RealSenseStereoInertial.cc.s
 .PHONY : cpp/RealSenseStereoInertial.cc.s
 
+generated/SettingsCompat.o: generated/SettingsCompat.cc.o
+.PHONY : generated/SettingsCompat.o
+
+# target to build an object file
+generated/SettingsCompat.cc.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.o
+.PHONY : generated/SettingsCompat.cc.o
+
+generated/SettingsCompat.i: generated/SettingsCompat.cc.i
+.PHONY : generated/SettingsCompat.i
+
+# target to preprocess a source file
+generated/SettingsCompat.cc.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.i
+.PHONY : generated/SettingsCompat.cc.i
+
+generated/SettingsCompat.s: generated/SettingsCompat.cc.s
+.PHONY : generated/SettingsCompat.s
+
+# target to generate assembly for a file
+generated/SettingsCompat.cc.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.s
+.PHONY : generated/SettingsCompat.cc.s
+
 tests/orb_settings_smoke.o: tests/orb_settings_smoke.cc.o
 .PHONY : tests/orb_settings_smoke.o
 
@@ -601,11 +638,15 @@ help:
 	@echo "... NightlySubmit"
 	@echo "... NightlyTest"
 	@echo "... NightlyUpdate"
+	@echo "... ORBSettingsCompat"
 	@echo "... ORBSettingsSmoke"
 	@echo "... RealSenseStereoInertial"
 	@echo "... cpp/RealSenseStereoInertial.o"
 	@echo "... cpp/RealSenseStereoInertial.i"
 	@echo "... cpp/RealSenseStereoInertial.s"
+	@echo "... generated/SettingsCompat.o"
+	@echo "... generated/SettingsCompat.i"
+	@echo "... generated/SettingsCompat.s"
 	@echo "... tests/orb_settings_smoke.o"
 	@echo "... tests/orb_settings_smoke.i"
 	@echo "... tests/orb_settings_smoke.s"

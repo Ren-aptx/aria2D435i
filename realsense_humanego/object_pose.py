@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import cv2
 import numpy as np
+
+
+PoseEstimator = Callable[
+    [str, np.ndarray, bool, Optional[np.ndarray], Path, Path],
+    Tuple[np.ndarray, Dict],
+]
 
 
 def _read_json(path: Path) -> Dict:
@@ -83,14 +89,23 @@ def robust_pca_pose(points_cam: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return pose, filtered
 
 
+def _object_pose_method(pose_methods: Any, object_key: str) -> str:
+    if isinstance(pose_methods, Mapping) or hasattr(pose_methods, "keys"):
+        methods = dict(pose_methods)
+        return str(methods.get(object_key, methods.get("default", "pca1"))).lower()
+    return str(pose_methods or "pca1").lower()
+
+
 def generate_rgbd_object_poses(
     session: Path,
     image_paths: Iterable[Path],
     min_points: int = 50,
     max_points_per_frame: int = 1500,
     max_output_points: int = 4000,
+    pose_methods: Any = "pca1",
+    pose_estimator: Optional[PoseEstimator] = None,
 ) -> Dict:
-    """Fuse static pre-manipulation RGB-D masks and write triangulator-compatible JSON."""
+    """Fuse RGB-D masks while preserving HumanEgo's task-level object axes."""
     session = Path(session).resolve()
     paths = [Path(path).resolve() for path in image_paths]
     if not paths:
@@ -115,9 +130,13 @@ def generate_rgbd_object_poses(
         raise FileNotFoundError("no mask_obj*.png files found in the selected frames")
 
     objects: Dict[str, Dict] = {}
+    anchor_key = object_keys[0]
+    anchor_center_cam0: Optional[np.ndarray] = None
     for object_key in object_keys:
         world_clouds: List[np.ndarray] = []
         used_frames: List[int] = []
+        representative_image: Optional[Path] = None
+        representative_mask: Optional[Path] = None
         for image_path in paths:
             frame_dir = image_path.parent
             mask_path = frame_dir / f"mask_{object_key}.png"
@@ -139,6 +158,9 @@ def generate_rgbd_object_poses(
             points_world = (c2w[:3, :3] @ points_cam.T + c2w[:3, 3:4]).T
             world_clouds.append(points_world)
             used_frames.append(int(camera["idx"]))
+            if representative_image is None:
+                representative_image = image_path
+                representative_mask = mask_path
         if not world_clouds:
             raise ValueError(f"{object_key}: no frame has {min_points} valid masked depth points")
 
@@ -149,7 +171,29 @@ def generate_rgbd_object_poses(
         points_cam0 = (
             world_to_cam0[:3, :3] @ points_world.T + world_to_cam0[:3, 3:4]
         ).T
-        object_to_cam0, filtered_cam0 = robust_pca_pose(points_cam0)
+        fallback_pose, filtered_cam0 = robust_pca_pose(points_cam0)
+        method = _object_pose_method(pose_methods, object_key)
+        is_anchor = object_key == anchor_key
+        if pose_estimator is None:
+            object_to_cam0 = fallback_pose
+            pose_info = {
+                "method": "realsense_rgbd_robust_pca",
+                "orientation_ambiguity": "PCA axes are deterministic but not semantic",
+            }
+        else:
+            object_to_cam0, pose_info = pose_estimator(
+                method,
+                filtered_cam0,
+                is_anchor,
+                anchor_center_cam0,
+                representative_image,
+                representative_mask,
+            )
+            object_to_cam0 = np.asarray(object_to_cam0, dtype=np.float64)
+            if object_to_cam0.shape != (4, 4):
+                raise ValueError(f"{object_key}: pose estimator returned {object_to_cam0.shape}")
+        if is_anchor:
+            anchor_center_cam0 = object_to_cam0[:3, 3].copy()
         # Keep exported world/camera point lists paired after robust filtering.
         filtered_world = (
             cam0_to_world[:3, :3] @ filtered_cam0.T + cam0_to_world[:3, 3:4]
@@ -159,10 +203,11 @@ def generate_rgbd_object_poses(
             "points_3d_cam0": filtered_cam0.tolist(),
             "object_to_cam0_matrix": object_to_cam0.tolist(),
             "info": {
-                "method": "realsense_rgbd_multiframe_pca",
+                **dict(pose_info),
+                "configured_pose_method": method,
                 "used_frame_indices": used_frames,
                 "point_count": len(filtered_cam0),
-                "orientation_ambiguity": "PCA axes are deterministic but not semantic",
+                "point_source": "realsense_rgbd_multiframe",
             },
         }
 

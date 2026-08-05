@@ -88,21 +88,26 @@ RealSenseStereoInertial_OBJECTS = \
 "CMakeFiles/RealSenseStereoInertial.dir/cpp/RealSenseStereoInertial.cc.o"
 
 # External object files for target RealSenseStereoInertial
-RealSenseStereoInertial_EXTERNAL_OBJECTS =
+RealSenseStereoInertial_EXTERNAL_OBJECTS = \
+"/home/tenda/aria2D435i/build/CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.o"
 
 RealSenseStereoInertial: CMakeFiles/RealSenseStereoInertial.dir/cpp/RealSenseStereoInertial.cc.o
+RealSenseStereoInertial: CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.o
 RealSenseStereoInertial: CMakeFiles/RealSenseStereoInertial.dir/build.make
 RealSenseStereoInertial: /home/tenda/ORB_SLAM3/lib/libORB_SLAM3.so
 RealSenseStereoInertial: /home/tenda/ORB_SLAM3/Thirdparty/DBoW2/lib/libDBoW2.so
 RealSenseStereoInertial: /home/tenda/ORB_SLAM3/Thirdparty/g2o/lib/libg2o.so
 RealSenseStereoInertial: /usr/lib/x86_64-linux-gnu/libopencv_imgcodecs.so.4.5.4d
+RealSenseStereoInertial: /usr/lib/x86_64-linux-gnu/libopencv_calib3d.so.4.5.4d
 RealSenseStereoInertial: /usr/local/lib/libpango_glgeometry.so.0.9.5
 RealSenseStereoInertial: /usr/local/lib/libpango_python.so.0.9.5
 RealSenseStereoInertial: /usr/local/lib/libpango_scene.so.0.9.5
 RealSenseStereoInertial: /usr/local/lib/libpango_tools.so.0.9.5
 RealSenseStereoInertial: /usr/local/lib/libpango_video.so.0.9.5
 RealSenseStereoInertial: /opt/ros/humble/lib/x86_64-linux-gnu/librealsense2.so.2.58.2
+RealSenseStereoInertial: /usr/lib/x86_64-linux-gnu/libopencv_features2d.so.4.5.4d
 RealSenseStereoInertial: /usr/lib/x86_64-linux-gnu/libopencv_imgproc.so.4.5.4d
+RealSenseStereoInertial: /usr/lib/x86_64-linux-gnu/libopencv_flann.so.4.5.4d
 RealSenseStereoInertial: /usr/lib/x86_64-linux-gnu/libopencv_core.so.4.5.4d
 RealSenseStereoInertial: /usr/local/lib/libpango_geometry.so.0.9.5
 RealSenseStereoInertial: /usr/local/lib/libtinyobj.so.0.9.5

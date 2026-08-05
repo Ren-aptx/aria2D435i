@@ -11,7 +11,7 @@ generates HumanEgo's existing compatibility contract:
 ```text
 SESSION/
 ├── raw/
-│   ├── sample.bag
+│   ├── sample.db3
 │   ├── calibration.json
 │   ├── orbslam3_runtime.yaml
 │   ├── timestamps.csv
@@ -66,11 +66,20 @@ The default serial is the attached D435i, `261622079447`:
   --output /absolute/path/to/data/serve_bread/realsense/rs_serve_bread_000
 ```
 
-Press Ctrl+C to stop. Add `--max-frames 300` for a bounded test or `--no-bag` if the
-librealsense bag copy is not wanted. The configured streams are color 1280×720@30,
+Press Ctrl+C to stop. Add `--max-frames 300` for a bounded test or `--no-bag` (also
+available as `--no-recording`) if the raw stream recording is not wanted. The installed
+ROS2 librealsense writes that recording as `raw/sample.db3`; its writer rejects the old
+`.bag` suffix. The configured streams are color 1280×720@30,
 depth/left IR/right IR 848×480@30, gyro 200 Hz and accelerometer 200 Hz. The projected
 IR emitter is disabled for stereo feature tracking. Runtime factory calibration is
-written both to `calibration.json` and to the generated ORB-SLAM3 YAML.
+written both to `calibration.json` and to the generated ORB-SLAM3 YAML. The infrared
+pair is declared as `Camera.type: Rectified` with the factory baseline, because D435i
+already supplies rectified stereo frames.
+
+At build time this project compiles a local compatibility copy of ORB-SLAM3's
+`Settings.cc`, initializing its camera pointers before the `Rectified` configuration is
+printed. This fixes the startup segmentation fault without modifying the external
+`/home/tenda/ORB_SLAM3` checkout or changing the camera geometry.
 
 The capture queue is bounded. If disk or SLAM processing cannot keep up,
 `capture_summary.json` reports dropped frames instead of silently growing memory.
@@ -86,8 +95,12 @@ python3 -m realsense_humanego \
 ```
 
 With MediaPipe installed, `--hands mediapipe` detects hands and lifts every keypoint
-with aligned depth. It uses a 7×7 median neighborhood, depth-continuity filtering,
-temporal fallback for holes, and the original hand-size estimate only as a final fallback:
+with aligned depth. It uses a center-guided 7×7 depth cluster, requires at least eight
+measured joints including three palm anchors, aligns MediaPipe's relative hand with an
+SVD similarity transform, and performs temporal fallback in world coordinates. A second
+sequence pass filters/interpolates tracks, applies Savitzky–Golay/EMA smoothing, rebuilds
+the gripper frame, and only then writes the `*_opt_world` fields. Phase labels are generated
+after this pass so hand motion can mark manipulation transitions:
 
 ```bash
 python3 -m pip install -e '.[hands]'
@@ -123,9 +136,10 @@ by copying the preceding pose. The original index and drop reasons are retained 
 
 The local HumanEgo checkout has unrelated/uncommitted RealSense experiments, so this
 repository does not overwrite them. The supplied runner bypasses only VRS/MPS base-data
-initialization. By default it runs DINO-SAM, fuses the static pre-manipulation masked
-RGB-D point clouds into HumanEgo's `camtriangulator_results.json` contract, then resumes
-LaMa, visualization, latch-and-propagate, and DatasetGen:
+initialization. By default it runs DINO-SAM, KptsSelector and CoTracker, replaces only
+CamTriangulator's 3D point source with masked RealSense depth, then resumes LaMa,
+VisualKpts and DatasetGen. Object axes still use the task's HumanEgo `pca1`, `pca2`, or
+`vlm` pose method, including anchor/context constraints:
 
 ```bash
 python3 scripts/run_humanego_downstream.py \
@@ -137,10 +151,9 @@ python3 scripts/run_humanego_downstream.py \
 Use `--from-stage`/`--to-stage` to resume or run a subset. Model weights and task prompts
 remain the responsibility of the existing HumanEgo configuration. No policy/training code
 changes are needed because the resulting `training_data.json` schema is unchanged.
-Pass `--object-pose triangulation` to retain HumanEgo's original keypoint selection,
-CoTracker, bundle-adjusted triangulation path. RGB-D PCA gives a deterministic geometric
-orientation, but not a semantic front/up direction for symmetric objects; use the original
-VLM orientation method when that distinction matters.
+Cached keypoint/tracker/pose JSON invalidated by the selected start stage is removed by
+default; pass `--keep-stage-cache` only for deliberate cache reuse. Pass
+`--object-pose triangulation` to retain HumanEgo's original bundle-adjusted 3D point source.
 
 ## Verification
 

@@ -14,20 +14,21 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <vector>
@@ -43,7 +44,7 @@ struct Options {
     std::string output;
     std::string serial = "261622079447";
     int max_frames = 0;
-    bool record_bag = true;
+    bool record_stream = true;
     bool viewer = false;
 };
 
@@ -54,7 +55,8 @@ void usage(const char* program) {
         << "Options:\n"
         << "  --serial SERIAL       RealSense serial (default: 261622079447)\n"
         << "  --max-frames N        Stop after N frames; 0 means until Ctrl+C\n"
-        << "  --no-bag              Do not also save raw/sample.bag\n"
+        << "  --no-bag              Do not also save raw/sample.db3 (legacy flag)\n"
+        << "  --no-recording        Alias for --no-bag\n"
         << "  --viewer              Enable the ORB-SLAM3 Pangolin viewer\n";
 }
 
@@ -76,8 +78,8 @@ Options parse_options(int argc, char** argv) {
             options.serial = value(arg);
         } else if (arg == "--max-frames") {
             options.max_frames = std::stoi(value(arg));
-        } else if (arg == "--no-bag") {
-            options.record_bag = false;
+        } else if (arg == "--no-bag" || arg == "--no-recording") {
+            options.record_stream = false;
         } else if (arg == "--viewer") {
             options.viewer = true;
         } else if (arg == "--help" || arg == "-h") {
@@ -228,9 +230,9 @@ void write_orb_settings(
     const rs2::video_stream_profile& right,
     const rs2::motion_stream_profile& gyro) {
     const rs2_intrinsics left_intrinsics = left.get_intrinsics();
-    const rs2_intrinsics right_intrinsics = right.get_intrinsics();
     const Eigen::Matrix4f right_to_left =
         extrinsics_matrix(right.get_extrinsics_to(left));
+    const float baseline = right_to_left.block<3, 1>(0, 3).norm();
     const Eigen::Matrix4f left_to_imu =
         extrinsics_matrix(left.get_extrinsics_to(gyro));
 
@@ -239,28 +241,14 @@ void write_orb_settings(
     out << std::setprecision(10)
         << "%YAML:1.0\n---\n"
         << "File.version: \"1.0\"\n"
-        // ORB-SLAM3's File.version=1.0 Rectified branch leaves originalCalib2_
-        // null and then dereferences it in Settings::operator<<. Supplying the
-        // complete factory stereo model avoids that upstream crash and lets
-        // ORB-SLAM3 compute consistent rectification maps itself.
-        << "Camera.type: \"PinHole\"\n"
+        // D435i infrared stereo frames are rectified by the device/SDK. Asking
+        // ORB-SLAM3 to rectify them again degrades the epipolar geometry.
+        << "Camera.type: \"Rectified\"\n"
         << "Camera1.fx: " << left_intrinsics.fx << "\n"
         << "Camera1.fy: " << left_intrinsics.fy << "\n"
         << "Camera1.cx: " << left_intrinsics.ppx << "\n"
         << "Camera1.cy: " << left_intrinsics.ppy << "\n"
-        << "Camera2.fx: " << right_intrinsics.fx << "\n"
-        << "Camera2.fy: " << right_intrinsics.fy << "\n"
-        << "Camera2.cx: " << right_intrinsics.ppx << "\n"
-        << "Camera2.cy: " << right_intrinsics.ppy << "\n"
-        << "Stereo.T_c1_c2: !!opencv-matrix\n"
-        << "   rows: 4\n   cols: 4\n   dt: f\n   data: [";
-    for (int row = 0; row < 4; ++row) {
-        for (int col = 0; col < 4; ++col) {
-            if (row || col) out << ", ";
-            out << right_to_left(row, col);
-        }
-    }
-    out << "]\n"
+        << "Stereo.b: " << baseline << "\n"
         << "Camera.width: " << left_intrinsics.width << "\n"
         << "Camera.height: " << left_intrinsics.height << "\n"
         << "Camera.fps: 30\n"
@@ -305,12 +293,8 @@ struct MotionSample {
 
 struct CaptureBuffers {
     std::mutex mutex;
-    std::condition_variable ready;
-    std::deque<rs2::frameset> frames;
     std::deque<MotionSample> gyroscope;
     std::deque<MotionSample> accelerometer;
-    std::size_t dropped_frames = 0;
-    double last_enqueued_timestamp_s = -1.0;
 };
 
 rs2_vector interpolate_acceleration(
@@ -419,6 +403,157 @@ cv::Mat frame_mat(const rs2::video_frame& frame, int type) {
         const_cast<void*>(frame.get_data()), cv::Mat::AUTO_STEP);
 }
 
+struct SelectedStreams {
+    rs2::sensor stereo_sensor;
+    rs2::sensor color_sensor;
+    rs2::sensor motion_sensor;
+
+    rs2::stream_profile depth;
+    rs2::stream_profile left;
+    rs2::stream_profile right;
+    rs2::stream_profile color;
+    rs2::stream_profile accel;
+    rs2::stream_profile gyro;
+
+    bool has_stereo = false;
+    bool has_color = false;
+    bool has_motion = false;
+};
+
+bool matches_video_profile(
+    const rs2::stream_profile& profile,
+    rs2_stream stream,
+    int index,
+    int width,
+    int height,
+    rs2_format format,
+    int fps) {
+    if (profile.stream_type() != stream || profile.stream_index() != index
+        || profile.format() != format || profile.fps() != fps) {
+        return false;
+    }
+    const rs2::video_stream_profile video =
+        profile.as<rs2::video_stream_profile>();
+    return video && video.width() == width && video.height() == height;
+}
+
+bool matches_motion_profile(
+    const rs2::stream_profile& profile,
+    rs2_stream stream,
+    int fps) {
+    return profile.stream_type() == stream
+        && profile.format() == RS2_FORMAT_MOTION_XYZ32F
+        && profile.fps() == fps;
+}
+
+SelectedStreams select_streams(
+    const rs2::device& device, int accel_fps, int gyro_fps) {
+    SelectedStreams result;
+
+    for (const rs2::sensor& sensor : device.query_sensors()) {
+        rs2::stream_profile local_depth;
+        rs2::stream_profile local_left;
+        rs2::stream_profile local_right;
+        rs2::stream_profile local_color;
+        rs2::stream_profile local_accel;
+        rs2::stream_profile local_gyro;
+
+        for (const rs2::stream_profile& profile : sensor.get_stream_profiles()) {
+            if (matches_video_profile(
+                    profile, RS2_STREAM_DEPTH, 0,
+                    848, 480, RS2_FORMAT_Z16, 30)) {
+                local_depth = profile;
+            } else if (matches_video_profile(
+                           profile, RS2_STREAM_INFRARED, 1,
+                           848, 480, RS2_FORMAT_Y8, 30)) {
+                local_left = profile;
+            } else if (matches_video_profile(
+                           profile, RS2_STREAM_INFRARED, 2,
+                           848, 480, RS2_FORMAT_Y8, 30)) {
+                local_right = profile;
+            } else if (matches_video_profile(
+                           profile, RS2_STREAM_COLOR, 0,
+                           848, 480, RS2_FORMAT_BGR8, 30)) {
+                local_color = profile;
+            } else if (matches_motion_profile(
+                           profile, RS2_STREAM_ACCEL, accel_fps)) {
+                local_accel = profile;
+            } else if (matches_motion_profile(
+                           profile, RS2_STREAM_GYRO, gyro_fps)) {
+                local_gyro = profile;
+            }
+        }
+
+        if (local_depth && local_left && local_right) {
+            result.stereo_sensor = sensor;
+            result.depth = local_depth;
+            result.left = local_left;
+            result.right = local_right;
+            result.has_stereo = true;
+        }
+        if (local_color) {
+            result.color_sensor = sensor;
+            result.color = local_color;
+            result.has_color = true;
+        }
+        if (local_accel && local_gyro) {
+            result.motion_sensor = sensor;
+            result.accel = local_accel;
+            result.gyro = local_gyro;
+            result.has_motion = true;
+        }
+    }
+
+    if (!result.has_stereo) {
+        throw std::runtime_error(
+            "could not find Depth + IR1 + IR2 profiles at 848x480@30");
+    }
+    if (!result.has_color) {
+        throw std::runtime_error(
+            "could not find Color BGR8 profile at 848x480@30");
+    }
+    if (!result.has_motion) {
+        throw std::runtime_error(
+            "could not find the selected Accel/Gyro MOTION_XYZ32F profiles");
+    }
+    return result;
+}
+
+void print_active_profile(const rs2::stream_profile& profile) {
+    std::cout << "ACTIVE STREAM: "
+              << rs2_stream_to_string(profile.stream_type());
+    if (profile.stream_type() == RS2_STREAM_INFRARED) {
+        std::cout << " " << profile.stream_index();
+    }
+    if (const rs2::video_stream_profile video =
+            profile.as<rs2::video_stream_profile>()) {
+        std::cout << " " << video.width() << "x" << video.height();
+    } else {
+        std::cout << " " << profile.fps() << " Hz";
+    }
+    std::cout << " " << rs2_format_to_string(profile.format()) << '\n';
+}
+
+void stop_sensor_noexcept(rs2::sensor& sensor, bool& started) {
+    if (!started) return;
+    try {
+        sensor.stop();
+    } catch (const std::exception& error) {
+        std::cerr << "Warning: sensor.stop() failed: " << error.what() << '\n';
+    }
+    started = false;
+}
+
+void close_sensor_noexcept(rs2::sensor& sensor, bool& opened) {
+    if (!opened) return;
+    try {
+        sensor.close();
+    } catch (const std::exception& error) {
+        std::cerr << "Warning: sensor.close() failed: " << error.what() << '\n';
+    }
+    opened = false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -447,83 +582,34 @@ int main(int argc, char** argv) {
         if (!selected) {
             throw std::runtime_error("RealSense serial " + options.serial + " was not found");
         }
+
         configure_device(selected);
         const int accel_fps = select_motion_fps(selected, RS2_STREAM_ACCEL, 200);
         const int gyro_fps = select_motion_fps(selected, RS2_STREAM_GYRO, 200);
         std::cout << "Selected IMU rates: accel=" << accel_fps
                   << " Hz, gyro=" << gyro_fps << " Hz\n";
 
-        rs2::config config;
-        config.enable_device(options.serial);
-        config.enable_stream(RS2_STREAM_COLOR, 1280, 720, RS2_FORMAT_BGR8, 30);
-        config.enable_stream(RS2_STREAM_DEPTH, 848, 480, RS2_FORMAT_Z16, 30);
-        config.enable_stream(RS2_STREAM_INFRARED, 1, 848, 480, RS2_FORMAT_Y8, 30);
-        config.enable_stream(RS2_STREAM_INFRARED, 2, 848, 480, RS2_FORMAT_Y8, 30);
-        config.enable_stream(RS2_STREAM_ACCEL, RS2_FORMAT_MOTION_XYZ32F, accel_fps);
-        config.enable_stream(RS2_STREAM_GYRO, RS2_FORMAT_MOTION_XYZ32F, gyro_fps);
-        if (options.record_bag) {
-            config.enable_record_to_file(join(raw, "sample.bag"));
+        // Query the exact profiles directly from the selected device. Video is
+        // later owned by a video-only pipeline; the motion module is opened
+        // independently and delivers motion_frame objects into motion_queue.
+        SelectedStreams streams = select_streams(selected, accel_fps, gyro_fps);
+        const auto color_profile = streams.color.as<rs2::video_stream_profile>();
+        const auto depth_profile = streams.depth.as<rs2::video_stream_profile>();
+        const auto left_profile = streams.left.as<rs2::video_stream_profile>();
+        const auto right_profile = streams.right.as<rs2::video_stream_profile>();
+        const auto gyro_profile = streams.gyro.as<rs2::motion_stream_profile>();
+        const rs2::depth_sensor depth_sensor =
+            streams.stereo_sensor.as<rs2::depth_sensor>();
+        if (!depth_sensor) {
+            throw std::runtime_error("selected stereo sensor is not a depth sensor");
         }
 
-        CaptureBuffers buffers;
-        std::mutex imu_log_mutex;
-        std::ofstream imu_log(join(raw, "imu.csv"));
-        imu_log << "timestamp_ns,type,x,y,z\n" << std::setprecision(10);
-
-        rs2::pipeline pipeline;
-        const std::size_t max_queued_frames = 8;
-        const rs2::pipeline_profile profile = pipeline.start(
-            config, [&](const rs2::frame& frame) {
-                if (const rs2::motion_frame motion = frame.as<rs2::motion_frame>()) {
-                    const MotionSample sample{
-                        motion.get_timestamp() * 1e-3, motion.get_motion_data()};
-                    const rs2_stream stream = motion.get_profile().stream_type();
-                    {
-                        std::lock_guard<std::mutex> lock(buffers.mutex);
-                        if (stream == RS2_STREAM_GYRO) buffers.gyroscope.push_back(sample);
-                        if (stream == RS2_STREAM_ACCEL) buffers.accelerometer.push_back(sample);
-                    }
-                    {
-                        std::lock_guard<std::mutex> lock(imu_log_mutex);
-                        imu_log << timestamp_ns(motion) << ','
-                                << (stream == RS2_STREAM_GYRO ? "gyro" : "accel") << ','
-                                << sample.value.x << ',' << sample.value.y << ','
-                                << sample.value.z << '\n';
-                    }
-                    return;
-                }
-
-                const rs2::frameset frames = frame.as<rs2::frameset>();
-                if (!frames || !frames.get_infrared_frame(1)
-                    || !frames.get_infrared_frame(2) || !frames.get_color_frame()
-                    || !frames.get_depth_frame()) {
-                    return;
-                }
-                const double time_s = frames.get_infrared_frame(1).get_timestamp() * 1e-3;
-                {
-                    std::lock_guard<std::mutex> lock(buffers.mutex);
-                    if (std::abs(time_s - buffers.last_enqueued_timestamp_s) < 1e-7) return;
-                    buffers.last_enqueued_timestamp_s = time_s;
-                    if (buffers.frames.size() >= max_queued_frames) {
-                        buffers.frames.pop_front();
-                        ++buffers.dropped_frames;
-                    }
-                    buffers.frames.push_back(frames);
-                }
-                buffers.ready.notify_one();
-            });
-
-        const auto color_profile = profile.get_stream(RS2_STREAM_COLOR)
-            .as<rs2::video_stream_profile>();
-        const auto depth_profile = profile.get_stream(RS2_STREAM_DEPTH)
-            .as<rs2::video_stream_profile>();
-        const auto left_profile = profile.get_stream(RS2_STREAM_INFRARED, 1)
-            .as<rs2::video_stream_profile>();
-        const auto right_profile = profile.get_stream(RS2_STREAM_INFRARED, 2)
-            .as<rs2::video_stream_profile>();
-        const auto gyro_profile = profile.get_stream(RS2_STREAM_GYRO)
-            .as<rs2::motion_stream_profile>();
-        const rs2::depth_sensor depth_sensor = profile.get_device().first<rs2::depth_sensor>();
+        print_active_profile(streams.depth);
+        print_active_profile(streams.left);
+        print_active_profile(streams.right);
+        print_active_profile(streams.color);
+        print_active_profile(streams.gyro);
+        print_active_profile(streams.accel);
 
         write_calibration(
             join(raw, "calibration.json"), color_profile, depth_profile,
@@ -533,105 +619,301 @@ int main(int argc, char** argv) {
 
         const Eigen::Matrix4f color_to_left = extrinsics_matrix(
             color_profile.get_extrinsics_to(left_profile));
+
+        // Load ORB vocabulary before starting the camera. This prevents several
+        // seconds of stale video/IMU data from accumulating during initialization.
         ORB_SLAM3::System slam(
             options.vocabulary, orb_settings, ORB_SLAM3::System::IMU_STEREO,
             options.viewer);
 
+        std::ofstream imu_log(join(raw, "imu.csv"));
         std::ofstream timestamps(join(raw, "timestamps.csv"));
+        std::ofstream trajectory_rgb(join(raw, "trajectory_rgb.txt"));
+        std::ofstream trajectory_left(join(raw, "trajectory_left_ir.txt"));
+        if (!imu_log || !timestamps || !trajectory_rgb || !trajectory_left) {
+            throw std::runtime_error("could not create one or more output log files in " + raw);
+        }
+
+        imu_log << "timestamp_ns,type,x,y,z\n" << std::setprecision(10);
         timestamps
             << "idx,rgb_timestamp_ns,depth_timestamp_ns,aligned_depth_timestamp_ns,"
                "ir_left_timestamp_ns,ir_right_timestamp_ns,rgb_file,depth_file,"
                "aligned_depth_file,ir_left_file,ir_right_file,tracking_state,pose_valid\n";
-        std::ofstream trajectory_rgb(join(raw, "trajectory_rgb.txt"));
-        std::ofstream trajectory_left(join(raw, "trajectory_left_ir.txt"));
         trajectory_rgb << std::setprecision(15);
         trajectory_left << std::setprecision(15);
 
-        rs2::align align_to_color(RS2_STREAM_COLOR);
-        std::size_t index = 0;
-        double previous_image_s = -std::numeric_limits<double>::infinity();
-        while (g_running.load()
-               && (options.max_frames == 0 || index < static_cast<std::size_t>(options.max_frames))) {
-            rs2::frameset frames;
-            {
-                std::unique_lock<std::mutex> lock(buffers.mutex);
-                buffers.ready.wait_for(lock, std::chrono::milliseconds(250), [&] {
-                    return !buffers.frames.empty() || !g_running.load();
-                });
-                if (buffers.frames.empty()) continue;
-                frames = buffers.frames.front();
-                buffers.frames.pop_front();
-            }
+        CaptureBuffers buffers;
 
-            const rs2::video_frame color = frames.get_color_frame();
-            const rs2::depth_frame depth = frames.get_depth_frame();
-            const rs2::video_frame left = frames.get_infrared_frame(1);
-            const rs2::video_frame right = frames.get_infrared_frame(2);
-            const double image_s = left.get_timestamp() * 1e-3;
-            if (image_s <= previous_image_s) continue;
-
-            const std::vector<ORB_SLAM3::IMU::Point> imu =
-                take_imu_until(buffers, previous_image_s, image_s);
-            const cv::Mat left_image = frame_mat(left, CV_8UC1);
-            const cv::Mat right_image = frame_mat(right, CV_8UC1);
-            const Sophus::SE3f world_to_left =
-                slam.TrackStereo(left_image, right_image, image_s, imu);
-            const int tracking_state = slam.GetTrackingState();
-            const bool pose_valid = tracking_state == 2 && world_to_left.matrix().allFinite();
-
-            const rs2::frameset aligned = align_to_color.process(frames);
-            const rs2::depth_frame aligned_depth = aligned.get_depth_frame();
-            const std::string name = frame_name(index);
-            cv::imwrite(join(join(raw, "rgb"), name), frame_mat(color, CV_8UC3));
-            cv::imwrite(join(join(raw, "depth"), name), frame_mat(depth, CV_16UC1));
-            cv::imwrite(
-                join(join(raw, "aligned_depth"), name),
-                frame_mat(aligned_depth, CV_16UC1));
-            cv::imwrite(join(join(raw, "ir_left"), name), left_image);
-            cv::imwrite(join(join(raw, "ir_right"), name), right_image);
-
-            timestamps << index << ',' << timestamp_ns(color) << ',' << timestamp_ns(depth)
-                       << ',' << timestamp_ns(aligned_depth) << ',' << timestamp_ns(left)
-                       << ',' << timestamp_ns(right) << ','
-                       << "rgb/" << name << ",depth/" << name << ",aligned_depth/" << name
-                       << ",ir_left/" << name << ",ir_right/" << name << ','
-                       << tracking_state << ',' << (pose_valid ? 1 : 0) << '\n';
-
-            if (pose_valid) {
-                const Eigen::Matrix4f left_to_world = world_to_left.inverse().matrix();
-                const Eigen::Matrix4f color_to_world = left_to_world * color_to_left;
-                const auto write_pose = [&](std::ofstream& out, const Eigen::Matrix4f& pose) {
-                    const Eigen::Quaternionf quaternion(pose.block<3, 3>(0, 0));
-                    out << image_s << ' ' << pose(0, 3) << ' ' << pose(1, 3) << ' '
-                        << pose(2, 3) << ' ' << quaternion.x() << ' ' << quaternion.y()
-                        << ' ' << quaternion.z() << ' ' << quaternion.w() << '\n';
-                };
-                // Trajectory time is the left-IR time used by TrackStereo. The converter
-                // interpolates this RGB optical-frame pose onto the actual RGB timestamps.
-                write_pose(trajectory_left, left_to_world);
-                write_pose(trajectory_rgb, color_to_world);
-            }
-
-            previous_image_s = image_s;
-            ++index;
-            if (index % 30 == 0) {
-                std::cout << "Captured " << index << " frames, tracking="
-                          << tracking_state << "\r" << std::flush;
-            }
+        // Critical separation:
+        //   * the pipeline contains VIDEO STREAMS ONLY, so wait_for_frames()
+        //     returns a synchronized Depth + IR1 + IR2 + Color frameset;
+        //   * the motion sensor writes individual Accel/Gyro motion_frame objects
+        //     into a dedicated frame_queue and never participates in video matching.
+        rs2::pipeline video_pipeline(context);
+        rs2::config video_config;
+        video_config.enable_device(options.serial);
+        video_config.enable_stream(
+            RS2_STREAM_DEPTH, 0, 848, 480, RS2_FORMAT_Z16, 30);
+        video_config.enable_stream(
+            RS2_STREAM_INFRARED, 1, 848, 480, RS2_FORMAT_Y8, 30);
+        video_config.enable_stream(
+            RS2_STREAM_INFRARED, 2, 848, 480, RS2_FORMAT_Y8, 30);
+        video_config.enable_stream(
+            RS2_STREAM_COLOR, 0, 848, 480, RS2_FORMAT_BGR8, 30);
+        if (options.record_stream) {
+            // The synchronized image streams are saved in this optional bag.
+            // IMU is always retained losslessly in raw/imu.csv.
+            video_config.enable_record_to_file(join(raw, "sample.db3"));
         }
 
-        g_running.store(false);
-        pipeline.stop();
+        rs2::frame_queue motion_queue(1024, false);
+        std::mutex worker_error_mutex;
+        std::exception_ptr worker_error;
+        const auto report_worker_error = [&]() {
+            std::lock_guard<std::mutex> lock(worker_error_mutex);
+            if (!worker_error) worker_error = std::current_exception();
+            g_running.store(false);
+        };
+
+        bool video_started = false;
+        bool motion_opened = false;
+        bool motion_started = false;
+        std::thread motion_worker;
+
+        const auto stop_video_noexcept = [&]() {
+            if (!video_started) return;
+            try {
+                video_pipeline.stop();
+            } catch (const std::exception& error) {
+                std::cerr << "Warning: video_pipeline.stop() failed: "
+                          << error.what() << '\n';
+            }
+            video_started = false;
+        };
+
+        const auto cleanup_streaming = [&]() {
+            // Stop producers first, then let the motion consumer leave its wait.
+            stop_sensor_noexcept(streams.motion_sensor, motion_started);
+            stop_video_noexcept();
+            g_running.store(false);
+
+            if (motion_worker.joinable()) motion_worker.join();
+            close_sensor_noexcept(streams.motion_sensor, motion_opened);
+        };
+
+        std::size_t index = 0;
+        std::size_t dropped_capture_frames = 0;
+
+        try {
+            // Start the video-only pipeline first. Unlike the previous manual
+            // rs2::syncer path, pipeline.wait_for_frames() uses the device's
+            // matcher topology and returns one coherent set for all four video
+            // streams requested above.
+            const rs2::pipeline_profile active_video =
+                video_pipeline.start(video_config);
+            video_started = true;
+
+            std::cout << "VIDEO PIPELINE STREAMS:\n";
+            for (const rs2::stream_profile& profile : active_video.get_streams()) {
+                print_active_profile(profile);
+            }
+
+            streams.motion_sensor.open(
+                std::vector<rs2::stream_profile>{streams.accel, streams.gyro});
+            motion_opened = true;
+
+            motion_worker = std::thread([&]() {
+                try {
+                    while (g_running.load()) {
+                        rs2::frame frame;
+                        if (!motion_queue.try_wait_for_frame(&frame, 100)) continue;
+                        const rs2::motion_frame motion = frame.as<rs2::motion_frame>();
+                        if (!motion) continue;
+
+                        const rs2_stream stream = motion.get_profile().stream_type();
+                        if (stream != RS2_STREAM_GYRO
+                            && stream != RS2_STREAM_ACCEL) {
+                            continue;
+                        }
+
+                        const MotionSample sample{
+                            motion.get_timestamp() * 1e-3,
+                            motion.get_motion_data()};
+                        {
+                            std::lock_guard<std::mutex> lock(buffers.mutex);
+                            if (stream == RS2_STREAM_GYRO) {
+                                buffers.gyroscope.push_back(sample);
+                            } else {
+                                buffers.accelerometer.push_back(sample);
+                            }
+                        }
+
+                        imu_log << timestamp_ns(motion) << ','
+                                << (stream == RS2_STREAM_GYRO ? "gyro" : "accel")
+                                << ',' << sample.value.x << ',' << sample.value.y
+                                << ',' << sample.value.z << '\n';
+                    }
+                } catch (...) {
+                    report_worker_error();
+                }
+            });
+
+            streams.motion_sensor.start(motion_queue);
+            motion_started = true;
+
+            rs2::align align_to_color(RS2_STREAM_COLOR);
+            double previous_image_s = -std::numeric_limits<double>::infinity();
+            bool have_left_frame_number = false;
+            unsigned long long previous_left_frame_number = 0;
+            std::size_t video_timeouts = 0;
+            std::size_t incomplete_sets = 0;
+            bool printed_first_frameset = false;
+
+            while (g_running.load()
+                   && (options.max_frames == 0
+                       || index < static_cast<std::size_t>(options.max_frames))) {
+                rs2::frameset frames;
+                if (!video_pipeline.try_wait_for_frames(&frames, 500)) {
+                    ++video_timeouts;
+                    {
+                        std::lock_guard<std::mutex> lock(worker_error_mutex);
+                        if (worker_error) break;
+                    }
+                    if (video_timeouts % 10 == 0) {
+                        std::cerr << "Waiting for synchronized video frames; "
+                                  << "timeouts=" << video_timeouts << '\n';
+                    }
+                    continue;
+                }
+
+                const rs2::video_frame color = frames.get_color_frame();
+                const rs2::depth_frame depth = frames.get_depth_frame();
+                const rs2::video_frame left = frames.get_infrared_frame(1);
+                const rs2::video_frame right = frames.get_infrared_frame(2);
+                if (!color || !depth || !left || !right) {
+                    ++incomplete_sets;
+                    if (incomplete_sets <= 5 || incomplete_sets % 30 == 0) {
+                        std::cerr << "Incomplete video frameset: depth="
+                                  << static_cast<bool>(depth)
+                                  << " ir1=" << static_cast<bool>(left)
+                                  << " ir2=" << static_cast<bool>(right)
+                                  << " color=" << static_cast<bool>(color)
+                                  << " count=" << incomplete_sets << '\n';
+                    }
+                    continue;
+                }
+
+                if (!printed_first_frameset) {
+                    std::cout << "First synchronized video frameset received: "
+                              << "depth+ir1+ir2+color\n";
+                    printed_first_frameset = true;
+                }
+
+                const double image_s = left.get_timestamp() * 1e-3;
+                if (image_s <= previous_image_s) continue;
+
+                const unsigned long long left_frame_number = left.get_frame_number();
+                if (have_left_frame_number
+                    && left_frame_number > previous_left_frame_number + 1) {
+                    dropped_capture_frames += static_cast<std::size_t>(
+                        left_frame_number - previous_left_frame_number - 1);
+                }
+                previous_left_frame_number = left_frame_number;
+                have_left_frame_number = true;
+
+                const std::vector<ORB_SLAM3::IMU::Point> imu =
+                    take_imu_until(buffers, previous_image_s, image_s);
+                const cv::Mat left_image = frame_mat(left, CV_8UC1);
+                const cv::Mat right_image = frame_mat(right, CV_8UC1);
+                const Sophus::SE3f world_to_left =
+                    slam.TrackStereo(left_image, right_image, image_s, imu);
+                const int tracking_state = slam.GetTrackingState();
+                const bool pose_valid =
+                    tracking_state == 2 && world_to_left.matrix().allFinite();
+
+                const rs2::frameset aligned = align_to_color.process(frames);
+                const rs2::depth_frame aligned_depth = aligned.get_depth_frame();
+                if (!aligned_depth) continue;
+
+                const std::string name = frame_name(index);
+                const bool wrote_rgb = cv::imwrite(
+                    join(join(raw, "rgb"), name), frame_mat(color, CV_8UC3));
+                const bool wrote_depth = cv::imwrite(
+                    join(join(raw, "depth"), name), frame_mat(depth, CV_16UC1));
+                const bool wrote_aligned = cv::imwrite(
+                    join(join(raw, "aligned_depth"), name),
+                    frame_mat(aligned_depth, CV_16UC1));
+                const bool wrote_left = cv::imwrite(
+                    join(join(raw, "ir_left"), name), left_image);
+                const bool wrote_right = cv::imwrite(
+                    join(join(raw, "ir_right"), name), right_image);
+                if (!wrote_rgb || !wrote_depth || !wrote_aligned
+                    || !wrote_left || !wrote_right) {
+                    throw std::runtime_error("failed to write image " + name);
+                }
+
+                timestamps << index << ',' << timestamp_ns(color) << ','
+                           << timestamp_ns(depth) << ',' << timestamp_ns(aligned_depth)
+                           << ',' << timestamp_ns(left) << ',' << timestamp_ns(right)
+                           << ',' << "rgb/" << name << ",depth/" << name
+                           << ",aligned_depth/" << name
+                           << ",ir_left/" << name << ",ir_right/" << name << ','
+                           << tracking_state << ',' << (pose_valid ? 1 : 0) << '\n';
+
+                if (pose_valid) {
+                    const Eigen::Matrix4f left_to_world =
+                        world_to_left.inverse().matrix();
+                    const Eigen::Matrix4f color_to_world =
+                        left_to_world * color_to_left;
+                    const auto write_pose = [&image_s](
+                        std::ofstream& out, const Eigen::Matrix4f& pose) {
+                        const Eigen::Quaternionf quaternion(
+                            pose.block<3, 3>(0, 0));
+                        out << image_s << ' ' << pose(0, 3) << ' ' << pose(1, 3)
+                            << ' ' << pose(2, 3) << ' ' << quaternion.x() << ' '
+                            << quaternion.y() << ' ' << quaternion.z() << ' '
+                            << quaternion.w() << '\n';
+                    };
+                    write_pose(trajectory_left, left_to_world);
+                    write_pose(trajectory_rgb, color_to_world);
+                }
+
+                previous_image_s = image_s;
+                ++index;
+                if (index % 30 == 0) {
+                    std::cout << "Captured " << index << " frames, tracking="
+                              << tracking_state << ", imu=" << imu.size()
+                              << "\r" << std::flush;
+                }
+            }
+
+            cleanup_streaming();
+        } catch (...) {
+            cleanup_streaming();
+            slam.Shutdown();
+            throw;
+        }
+
         slam.Shutdown();
         timestamps.flush();
         trajectory_rgb.flush();
         trajectory_left.flush();
         imu_log.flush();
 
+        {
+            std::lock_guard<std::mutex> lock(worker_error_mutex);
+            if (worker_error) std::rethrow_exception(worker_error);
+        }
+
         std::ofstream summary(join(raw, "capture_summary.json"));
+        if (!summary) {
+            throw std::runtime_error("could not write capture_summary.json");
+        }
         summary << "{\n  \"serial\": \"" << options.serial << "\",\n"
                 << "  \"frames\": " << index << ",\n"
-                << "  \"dropped_capture_frames\": " << buffers.dropped_frames << "\n}\n";
+                << "  \"dropped_capture_frames\": "
+                << dropped_capture_frames << "\n}\n";
+
         std::cout << "\nCapture complete: " << index << " frames in " << raw << '\n';
         return index == 0 ? 2 : 0;
     } catch (const rs2::error& error) {

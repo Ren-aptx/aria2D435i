@@ -31,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--depth-patch-radius", type=int, default=3,
                         help="3 gives the recommended 7x7 neighborhood")
     parser.add_argument("--min-depth-pixels", type=int, default=4)
+    parser.add_argument("--min-depth-joints", type=int, default=8)
+    parser.add_argument("--min-palm-depth-joints", type=int, default=3)
+    parser.add_argument("--hand-confidence", type=float, default=0.3)
+    parser.add_argument("--hand-min-segment", type=int, default=6)
+    parser.add_argument("--hand-interp-gap", type=int, default=10)
     parser.add_argument("--finish-frames", type=int, default=60)
     return parser
 
@@ -48,6 +53,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         grasp_smooth_window=args.grasp_window,
         depth_patch_radius=args.depth_patch_radius,
         min_valid_depth_pixels=args.min_depth_pixels,
+        min_depth_joints=args.min_depth_joints,
+        min_palm_depth_joints=args.min_palm_depth_joints,
+        hand_confidence_threshold=args.hand_confidence,
+        hand_min_segment_frames=args.hand_min_segment,
+        hand_interp_max_gap=args.hand_interp_gap,
         finish_frames=args.finish_frames,
     )
     manifest = export_session(config)
@@ -57,4 +67,3 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

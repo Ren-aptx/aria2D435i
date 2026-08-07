@@ -272,6 +272,13 @@ class MediaPipeDetector:
             result.multi_hand_landmarks, worlds, result.multi_handedness
         ):
             category = handedness.classification[0]
+            raw_side = category.label
+
+            if raw_side == "Left":
+                mapped_side = "Right"
+            else:
+                mapped_side = "Left"
+
             points_2d = np.array(
                 [[point.x * width, point.y * height] for point in landmarks.landmark],
                 dtype=np.float64,
@@ -279,9 +286,15 @@ class MediaPipeDetector:
             world_points = None if world is None else np.array(
                 [[point.x, point.y, point.z] for point in world.landmark], dtype=np.float64
             )
+            # detected.append(DetectedHand(
+            #     side=category.label.lower(), confidence=float(category.score),
+            #     landmarks_2d=points_2d, world_landmarks=world_points,
+            # ))
             detected.append(DetectedHand(
-                side=category.label.lower(), confidence=float(category.score),
-                landmarks_2d=points_2d, world_landmarks=world_points,
+                side=mapped_side.lower(),
+                confidence=float(category.score),
+                landmarks_2d=points_2d,
+                world_landmarks=world_points,
             ))
         return detected
 

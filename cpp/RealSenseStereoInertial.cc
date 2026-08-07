@@ -713,6 +713,25 @@ int main(int argc, char** argv) {
                 video_pipeline.start(video_config);
             video_started = true;
 
+            // --- 预热阶段 ---
+            const int warmup_frames = 60;        // 丢弃 60 帧（约 2 秒）
+            std::cout << "Warming up camera, discarding " << warmup_frames << " frames...\n";
+            for (int i = 0; i < warmup_frames; ++i) {
+                rs2::frameset frames;
+                if (video_pipeline.try_wait_for_frames(&frames, 2000)) {
+                    // 丢弃帧，不做任何处理
+                } else {
+                    std::cerr << "Warning: warmup frame timeout\n";
+                }
+            }
+            // 若同时有 IMU 数据，也可清空之前的 IMU 缓冲（防止旧数据混入）
+            {
+                std::lock_guard<std::mutex> lock(buffers.mutex);
+                buffers.gyroscope.clear();
+                buffers.accelerometer.clear();
+            }
+            std::cout << "Warmup done, starting capture...\n";
+
             std::cout << "VIDEO PIPELINE STREAMS:\n";
             for (const rs2::stream_profile& profile : active_video.get_streams()) {
                 print_active_profile(profile);

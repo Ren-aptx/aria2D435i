@@ -6,6 +6,6 @@ Requires-Python: >=3.8
 Requires-Dist: numpy>=1.20
 Requires-Dist: opencv-python>=4.5
 Provides-Extra: hands
-Requires-Dist: mediapipe>=0.10; extra == "hands"
+Requires-Dist: mediapipe==0.10.8; extra == "hands"
 Provides-Extra: test
 Requires-Dist: pytest>=7; extra == "test"

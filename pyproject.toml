@@ -10,7 +10,7 @@ requires-python = ">=3.8"
 dependencies = ["numpy>=1.20", "opencv-python>=4.5"]
 
 [project.optional-dependencies]
-hands = ["mediapipe>=0.10.8"]
+hands = ["mediapipe==0.10.8"]
 test = ["pytest>=7"]
 
 [project.scripts]

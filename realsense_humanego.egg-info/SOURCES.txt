@@ -13,6 +13,8 @@ realsense_humanego.egg-info/dependency_links.txt
 realsense_humanego.egg-info/entry_points.txt
 realsense_humanego.egg-info/requires.txt
 realsense_humanego.egg-info/top_level.txt
+tests/test_depth.py
+tests/test_downstream.py
 tests/test_exporter.py
 tests/test_geometry.py
 tests/test_hands.py

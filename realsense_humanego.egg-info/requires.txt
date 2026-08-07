@@ -2,7 +2,7 @@ numpy>=1.20
 opencv-python>=4.5
 
 [hands]
-mediapipe>=0.10
+mediapipe==0.10.8
 
 [test]
 pytest>=7

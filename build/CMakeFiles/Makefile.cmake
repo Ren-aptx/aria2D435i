@@ -14,10 +14,6 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/lib/x86_64-linux-gnu/cmake/opencv4/OpenCVConfig.cmake"
   "/usr/lib/x86_64-linux-gnu/cmake/opencv4/OpenCVModules-release.cmake"
   "/usr/lib/x86_64-linux-gnu/cmake/opencv4/OpenCVModules.cmake"
-  "/usr/local/lib/cmake/Pangolin/PangolinConfig.cmake"
-  "/usr/local/lib/cmake/Pangolin/PangolinConfigVersion.cmake"
-  "/usr/local/lib/cmake/Pangolin/PangolinTargets-release.cmake"
-  "/usr/local/lib/cmake/Pangolin/PangolinTargets.cmake"
   "/usr/local/lib/cmake/realsense2/realsense2Config.cmake"
   "/usr/local/lib/cmake/realsense2/realsense2ConfigVersion.cmake"
   "/usr/local/lib/cmake/realsense2/realsense2Targets-release.cmake"
@@ -34,7 +30,6 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/CMakeDetermineCompilerId.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeDetermineSystem.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeFindBinUtils.cmake"
-  "/usr/share/cmake-3.28/Modules/CMakeFindDependencyMacro.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeGenericSystem.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeInitializeConfigs.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeLanguageInformation.cmake"
@@ -50,9 +45,6 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/CTest.cmake"
   "/usr/share/cmake-3.28/Modules/CTestTargets.cmake"
   "/usr/share/cmake-3.28/Modules/CTestUseLaunchers.cmake"
-  "/usr/share/cmake-3.28/Modules/CheckCXXSourceCompiles.cmake"
-  "/usr/share/cmake-3.28/Modules/CheckIncludeFileCXX.cmake"
-  "/usr/share/cmake-3.28/Modules/CheckLibraryExists.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/ADSP-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/ARMCC-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/ARMClang-DetermineCompiler.cmake"
@@ -97,11 +89,8 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/Compiler/XLClang-CXX-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/Compiler/zOS-CXX-DetermineCompiler.cmake"
   "/usr/share/cmake-3.28/Modules/DartConfiguration.tcl.in"
-  "/usr/share/cmake-3.28/Modules/FindOpenGL.cmake"
   "/usr/share/cmake-3.28/Modules/FindPackageHandleStandardArgs.cmake"
   "/usr/share/cmake-3.28/Modules/FindPackageMessage.cmake"
-  "/usr/share/cmake-3.28/Modules/FindThreads.cmake"
-  "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake"
   "/usr/share/cmake-3.28/Modules/Internal/FeatureTesting.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-Determine-CXX.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux-GNU-CXX.cmake"
@@ -109,9 +98,6 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.28/Modules/Platform/Linux-Initialize.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/Linux.cmake"
   "/usr/share/cmake-3.28/Modules/Platform/UnixPaths.cmake"
-  "/usr/share/eigen3/cmake/Eigen3Config.cmake"
-  "/usr/share/eigen3/cmake/Eigen3ConfigVersion.cmake"
-  "/usr/share/eigen3/cmake/Eigen3Targets.cmake"
   )
 
 # The corresponding makefile is:
@@ -131,8 +117,7 @@ set(CMAKE_MAKEFILE_PRODUCTS
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
-  "CMakeFiles/ORBSettingsCompat.dir/DependInfo.cmake"
-  "CMakeFiles/RealSenseStereoInertial.dir/DependInfo.cmake"
+  "CMakeFiles/RealSenseRGBDRecorder.dir/DependInfo.cmake"
   "CMakeFiles/Experimental.dir/DependInfo.cmake"
   "CMakeFiles/Nightly.dir/DependInfo.cmake"
   "CMakeFiles/Continuous.dir/DependInfo.cmake"
@@ -161,5 +146,4 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/ContinuousCoverage.dir/DependInfo.cmake"
   "CMakeFiles/ContinuousMemCheck.dir/DependInfo.cmake"
   "CMakeFiles/ContinuousSubmit.dir/DependInfo.cmake"
-  "CMakeFiles/ORBSettingsSmoke.dir/DependInfo.cmake"
   )

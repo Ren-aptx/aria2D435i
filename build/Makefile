@@ -127,30 +127,17 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named ORBSettingsCompat
+# Target rules for targets named RealSenseRGBDRecorder
 
 # Build rule for target.
-ORBSettingsCompat: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 ORBSettingsCompat
-.PHONY : ORBSettingsCompat
+RealSenseRGBDRecorder: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 RealSenseRGBDRecorder
+.PHONY : RealSenseRGBDRecorder
 
 # fast build rule for target.
-ORBSettingsCompat/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/build
-.PHONY : ORBSettingsCompat/fast
-
-#=============================================================================
-# Target rules for targets named RealSenseStereoInertial
-
-# Build rule for target.
-RealSenseStereoInertial: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 RealSenseStereoInertial
-.PHONY : RealSenseStereoInertial
-
-# fast build rule for target.
-RealSenseStereoInertial/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/build
-.PHONY : RealSenseStereoInertial/fast
+RealSenseRGBDRecorder/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseRGBDRecorder.dir/build.make CMakeFiles/RealSenseRGBDRecorder.dir/build
+.PHONY : RealSenseRGBDRecorder/fast
 
 #=============================================================================
 # Target rules for targets named Experimental
@@ -516,90 +503,29 @@ ContinuousSubmit/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ContinuousSubmit.dir/build.make CMakeFiles/ContinuousSubmit.dir/build
 .PHONY : ContinuousSubmit/fast
 
-#=============================================================================
-# Target rules for targets named ORBSettingsSmoke
-
-# Build rule for target.
-ORBSettingsSmoke: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 ORBSettingsSmoke
-.PHONY : ORBSettingsSmoke
-
-# fast build rule for target.
-ORBSettingsSmoke/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsSmoke.dir/build.make CMakeFiles/ORBSettingsSmoke.dir/build
-.PHONY : ORBSettingsSmoke/fast
-
-cpp/RealSenseStereoInertial.o: cpp/RealSenseStereoInertial.cc.o
-.PHONY : cpp/RealSenseStereoInertial.o
+cpp/RealSenseRGBDRecorder.o: cpp/RealSenseRGBDRecorder.cc.o
+.PHONY : cpp/RealSenseRGBDRecorder.o
 
 # target to build an object file
-cpp/RealSenseStereoInertial.cc.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/cpp/RealSenseStereoInertial.cc.o
-.PHONY : cpp/RealSenseStereoInertial.cc.o
+cpp/RealSenseRGBDRecorder.cc.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseRGBDRecorder.dir/build.make CMakeFiles/RealSenseRGBDRecorder.dir/cpp/RealSenseRGBDRecorder.cc.o
+.PHONY : cpp/RealSenseRGBDRecorder.cc.o
 
-cpp/RealSenseStereoInertial.i: cpp/RealSenseStereoInertial.cc.i
-.PHONY : cpp/RealSenseStereoInertial.i
-
-# target to preprocess a source file
-cpp/RealSenseStereoInertial.cc.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/cpp/RealSenseStereoInertial.cc.i
-.PHONY : cpp/RealSenseStereoInertial.cc.i
-
-cpp/RealSenseStereoInertial.s: cpp/RealSenseStereoInertial.cc.s
-.PHONY : cpp/RealSenseStereoInertial.s
-
-# target to generate assembly for a file
-cpp/RealSenseStereoInertial.cc.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/cpp/RealSenseStereoInertial.cc.s
-.PHONY : cpp/RealSenseStereoInertial.cc.s
-
-generated/SettingsCompat.o: generated/SettingsCompat.cc.o
-.PHONY : generated/SettingsCompat.o
-
-# target to build an object file
-generated/SettingsCompat.cc.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.o
-.PHONY : generated/SettingsCompat.cc.o
-
-generated/SettingsCompat.i: generated/SettingsCompat.cc.i
-.PHONY : generated/SettingsCompat.i
+cpp/RealSenseRGBDRecorder.i: cpp/RealSenseRGBDRecorder.cc.i
+.PHONY : cpp/RealSenseRGBDRecorder.i
 
 # target to preprocess a source file
-generated/SettingsCompat.cc.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.i
-.PHONY : generated/SettingsCompat.cc.i
+cpp/RealSenseRGBDRecorder.cc.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseRGBDRecorder.dir/build.make CMakeFiles/RealSenseRGBDRecorder.dir/cpp/RealSenseRGBDRecorder.cc.i
+.PHONY : cpp/RealSenseRGBDRecorder.cc.i
 
-generated/SettingsCompat.s: generated/SettingsCompat.cc.s
-.PHONY : generated/SettingsCompat.s
-
-# target to generate assembly for a file
-generated/SettingsCompat.cc.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/generated/SettingsCompat.cc.s
-.PHONY : generated/SettingsCompat.cc.s
-
-tests/orb_settings_smoke.o: tests/orb_settings_smoke.cc.o
-.PHONY : tests/orb_settings_smoke.o
-
-# target to build an object file
-tests/orb_settings_smoke.cc.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsSmoke.dir/build.make CMakeFiles/ORBSettingsSmoke.dir/tests/orb_settings_smoke.cc.o
-.PHONY : tests/orb_settings_smoke.cc.o
-
-tests/orb_settings_smoke.i: tests/orb_settings_smoke.cc.i
-.PHONY : tests/orb_settings_smoke.i
-
-# target to preprocess a source file
-tests/orb_settings_smoke.cc.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsSmoke.dir/build.make CMakeFiles/ORBSettingsSmoke.dir/tests/orb_settings_smoke.cc.i
-.PHONY : tests/orb_settings_smoke.cc.i
-
-tests/orb_settings_smoke.s: tests/orb_settings_smoke.cc.s
-.PHONY : tests/orb_settings_smoke.s
+cpp/RealSenseRGBDRecorder.s: cpp/RealSenseRGBDRecorder.cc.s
+.PHONY : cpp/RealSenseRGBDRecorder.s
 
 # target to generate assembly for a file
-tests/orb_settings_smoke.cc.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsSmoke.dir/build.make CMakeFiles/ORBSettingsSmoke.dir/tests/orb_settings_smoke.cc.s
-.PHONY : tests/orb_settings_smoke.cc.s
+cpp/RealSenseRGBDRecorder.cc.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseRGBDRecorder.dir/build.make CMakeFiles/RealSenseRGBDRecorder.dir/cpp/RealSenseRGBDRecorder.cc.s
+.PHONY : cpp/RealSenseRGBDRecorder.cc.s
 
 # Help Target
 help:
@@ -638,18 +564,10 @@ help:
 	@echo "... NightlySubmit"
 	@echo "... NightlyTest"
 	@echo "... NightlyUpdate"
-	@echo "... ORBSettingsCompat"
-	@echo "... ORBSettingsSmoke"
-	@echo "... RealSenseStereoInertial"
-	@echo "... cpp/RealSenseStereoInertial.o"
-	@echo "... cpp/RealSenseStereoInertial.i"
-	@echo "... cpp/RealSenseStereoInertial.s"
-	@echo "... generated/SettingsCompat.o"
-	@echo "... generated/SettingsCompat.i"
-	@echo "... generated/SettingsCompat.s"
-	@echo "... tests/orb_settings_smoke.o"
-	@echo "... tests/orb_settings_smoke.i"
-	@echo "... tests/orb_settings_smoke.s"
+	@echo "... RealSenseRGBDRecorder"
+	@echo "... cpp/RealSenseRGBDRecorder.o"
+	@echo "... cpp/RealSenseRGBDRecorder.i"
+	@echo "... cpp/RealSenseRGBDRecorder.s"
 .PHONY : help
 
 

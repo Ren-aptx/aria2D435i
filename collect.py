@@ -20,14 +20,14 @@ def collect_mask_files(dataset_root, output_dir="all_masks"):
         if not sub_dir.is_dir():
             continue   # 跳过非文件夹
 
-        src_file = sub_dir / "mask_obj1.png"
+        src_file = sub_dir / "rgb_WArmObjKpts.png"
         if not src_file.exists():
             print(f"警告: {src_file} 不存在，跳过")
             continue
 
         # 构造目标文件名：加上子目录名前缀以避免重名
         # 例如 00473_mask_obj1.png
-        dst_filename = f"{entry}_mask_obj1.png"
+        dst_filename = f"{entry}_rgb_WArmObjKpts.png"
         dst_path = out_path / dst_filename
 
         # 复制文件（保留元数据）

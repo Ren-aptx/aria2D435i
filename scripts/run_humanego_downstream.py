@@ -57,7 +57,16 @@ def parser() -> argparse.ArgumentParser:
         "--object-pose", choices=["rgbd", "triangulation"], default="rgbd",
         help="RGB-D fusion (default) or original CoTracker triangulation",
     )
-    result.add_argument("--video", action="store_true", help="export HumanEgo diagnostics")
+    videos = result.add_mutually_exclusive_group()
+    videos.add_argument(
+        "--video", dest="video", action="store_true",
+        help="export aria_vis.mp4 and visualkpts_vis.mp4 (default)",
+    )
+    videos.add_argument(
+        "--no-video", dest="video", action="store_false",
+        help="skip the two final diagnostic videos",
+    )
+    result.set_defaults(video=True)
     result.add_argument("--gif", action="store_true")
     result.add_argument(
         "--keep-stage-cache", action="store_true",
@@ -91,6 +100,7 @@ def main(argv=None) -> int:
     bridge_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(bridge_root))
     from realsense_humanego.object_pose import generate_rgbd_object_poses
+    from realsense_humanego.visualization import export_official_videos
 
     sys.path.insert(0, str(humanego))
     from preprocess.CoTrackerOffline import reset_cotracker_offline
@@ -110,7 +120,10 @@ def main(argv=None) -> int:
     engine.mps_path = str(session)
     engine.cfg_path = str(cfg)
     engine.task = args.task
-    engine.export_video = args.video
+    # Final MP4s are streamed after all selected stages, avoiding the original
+    # implementation's full-sequence RAM accumulation. Keep the old path only
+    # when a GIF was explicitly requested.
+    engine.export_video = args.gif
     engine.export_gif = args.gif
     engine.backend = "aria"
     engine.sensor_backend = "aria"  # exported filenames intentionally use legacy names
@@ -184,6 +197,14 @@ def main(argv=None) -> int:
             continue
         print(f"[RealSense bridge] HumanEgo stage: {stage}")
         methods[stage]()
+    if args.video:
+        print("[RealSense bridge] exporting official diagnostic videos")
+        try:
+            videos = export_official_videos(session)
+            for name, info in videos.items():
+                print(f"[RealSense bridge] {name}: {info['path']} ({info['frames']} frames)")
+        except FileNotFoundError as error:
+            print(f"[RealSense bridge] video export incomplete: {error}")
     return 0
 
 

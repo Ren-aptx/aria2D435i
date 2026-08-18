@@ -1,5 +1,4 @@
-/home/tenda/aria2D435i/build/CMakeFiles/ORBSettingsCompat.dir
-/home/tenda/aria2D435i/build/CMakeFiles/RealSenseStereoInertial.dir
+/home/tenda/aria2D435i/build/CMakeFiles/RealSenseRGBDRecorder.dir
 /home/tenda/aria2D435i/build/CMakeFiles/Experimental.dir
 /home/tenda/aria2D435i/build/CMakeFiles/Nightly.dir
 /home/tenda/aria2D435i/build/CMakeFiles/Continuous.dir
@@ -28,7 +27,6 @@
 /home/tenda/aria2D435i/build/CMakeFiles/ContinuousCoverage.dir
 /home/tenda/aria2D435i/build/CMakeFiles/ContinuousMemCheck.dir
 /home/tenda/aria2D435i/build/CMakeFiles/ContinuousSubmit.dir
-/home/tenda/aria2D435i/build/CMakeFiles/ORBSettingsSmoke.dir
 /home/tenda/aria2D435i/build/CMakeFiles/test.dir
 /home/tenda/aria2D435i/build/CMakeFiles/edit_cache.dir
 /home/tenda/aria2D435i/build/CMakeFiles/rebuild_cache.dir

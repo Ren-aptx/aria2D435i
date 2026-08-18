@@ -16,7 +16,10 @@ from .geometry import rotation_angle
 # MP_TO_ARIA[aria index] = MediaPipe index. Palm center is synthesized.
 MP_TO_ARIA = [4, 8, 12, 16, 20, 0, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15, 17, 18, 19]
 REQUIRED_PALM_MP_INDICES = (0, 5, 9, 13, 17)
-
+FRAME_ANCHOR_MP_INDICES = np.array(
+    [0, 2, 5, 9, 13, 17],
+    dtype=int,
+)
 
 @dataclass
 class DetectedHand:
@@ -34,6 +37,18 @@ def remap_mediapipe_to_aria(points: np.ndarray) -> np.ndarray:
     aria[:20] = points[MP_TO_ARIA]
     aria[20] = (points[0] + points[5] + points[9]) / 3.0
     return aria
+
+
+def _normalized_pinch_ratio_2d(points_mediapipe: np.ndarray) -> float:
+    """Scale-invariant 2D thumb-index aperture used for grasp hysteresis."""
+    points = np.asarray(points_mediapipe, dtype=np.float64)
+    if points.shape != (21, 2):
+        raise ValueError(f"expected MediaPipe landmarks shape (21, 2), got {points.shape}")
+    palm_size = float(np.linalg.norm(points[9] - points[0]))
+    if not np.isfinite(palm_size) or palm_size < 1.0:
+        return float("inf")
+    pinch = float(np.linalg.norm(points[4] - points[8]))
+    return pinch / palm_size
 
 
 def patch_depth(
@@ -157,19 +172,91 @@ def recover_keypoints_rgbd(
     cx, cy = float(intrinsics[0, 2]), float(intrinsics[1, 2])
     result = np.full((21, 3), np.nan, dtype=np.float64)
     depth_valid = np.zeros(21, dtype=bool)
-    for index, (u, v) in enumerate(points_2d):
+    # 不直接把所有depth写入result
+    depth_points = np.full(
+        (21,3),
+        np.nan,
+        dtype=np.float64,
+    )
+
+    depth_valid = np.zeros(
+        21,
+        dtype=bool
+    )
+
+
+    for index, (u,v) in enumerate(points_2d):
+
         z = patch_depth(
-            depth_m, u, v, radius=patch_radius, min_valid_pixels=min_valid_pixels
+            depth_m,
+            u,
+            v,
+            radius=patch_radius,
+            min_valid_pixels=min_valid_pixels,
         )
-        if z is not None:
-            result[index] = [(u - cx) * z / fx, (v - cy) * z / fy, z]
-            depth_valid[index] = True
+
+        if z is None:
+            continue
+
+        depth_points[index] = [
+            (u-cx)*z/fx,
+            (v-cy)*z/fy,
+            z,
+        ]
+
+        depth_valid[index] = True
 
     depth_hits = int(np.sum(depth_valid))
     palm_hits = int(np.sum(depth_valid[list(REQUIRED_PALM_MP_INDICES)]))
     if depth_hits < min_depth_joints or palm_hits < min_palm_depth_joints:
         return (None, None) if return_quality else None
 
+    anchor_indices = FRAME_ANCHOR_MP_INDICES
+    anchor_valid = depth_valid[anchor_indices]
+
+    valid_indices = anchor_indices[anchor_valid]
+
+    if len(valid_indices) < 4:
+        return (None, None) if return_quality else None
+
+    anchor_depths = depth_points[valid_indices, 2]
+    median_depth = float(np.median(anchor_depths))
+
+    # 排除来自面包、盒子或背景的错误深度。
+    DEPTH_THRESHOLD = 0.035
+
+
+    coherent = (
+        np.abs(
+            anchor_depths -
+            median_depth
+        )
+        <= DEPTH_THRESHOLD
+    )
+
+    fit_indices = valid_indices[coherent]
+
+    if len(fit_indices) < 4:
+        return (None, None) if return_quality else None
+
+    if world_landmarks is not None:
+        fitted = _similarity_align(
+            world_landmarks,
+            world_landmarks[fit_indices],
+            depth_points[fit_indices],
+        )
+
+        if fitted is None:
+            return (None, None) if return_quality else None
+
+        # 使用同一个刚性/尺度变换恢复完整手骨架，
+        # 不再让每个关节使用互相矛盾的深度。
+        result = fitted
+    else:
+        # Without MediaPipe metric world landmarks there is no rigid template
+        # to fit. Preserve the valid RGB-D back-projections and fill only the
+        # missing joints through the temporal/visual fallbacks below.
+        result[depth_valid] = depth_points[depth_valid]
     aligned_fallback = None
     if world_landmarks is not None:
         aligned_fallback = _similarity_align(
@@ -202,7 +289,39 @@ def recover_keypoints_rgbd(
             result[index] = aligned_fallback[index]
         if not np.all(np.isfinite(result[index])) and visual_fallback is not None:
             result[index] = visual_fallback[index]
+    if previous_points_world is not None:
 
+        previous_points_world = np.asarray(
+            previous_points_world,
+            dtype=np.float64,
+        )
+
+        current_points_world = result
+        if current_color_to_world is not None:
+            current_points_world = (
+                current_color_to_world[:3, :3] @ result.T
+                + current_color_to_world[:3, 3:4]
+            ).T
+
+        displacement = np.linalg.norm(
+            current_points_world -
+            previous_points_world,
+            axis=1,
+        )
+
+
+        median_move = np.median(
+            displacement
+        )
+
+
+        # 单帧手骨架不应该跳10cm+
+        if median_move > 0.08:
+
+            return (
+                None,
+                None
+            ) if return_quality else None
     if not np.all(np.isfinite(result)) or np.any(result[:, 2] <= 0):
         return (None, None) if return_quality else None
     quality = {
@@ -219,28 +338,74 @@ def _normalize(vector: np.ndarray) -> Optional[np.ndarray]:
     return None if norm < 1e-7 else vector / norm
 
 
-def hand_frame(points_world_aria: np.ndarray, previous: Optional[np.ndarray]) -> Optional[np.ndarray]:
-    """Construct the stable HumanEgo pinch frame from wrist/MCP landmarks."""
-    thumb_base, index_base = points_world_aria[6], points_world_aria[8]
+def hand_frame(
+    points_world_aria: np.ndarray,
+    previous: Optional[np.ndarray],
+) -> Optional[np.ndarray]:
+
+    thumb_base = points_world_aria[6]
+    index_base = points_world_aria[8]
     wrist = points_world_aria[5]
-    x_axis = _normalize(index_base - thumb_base)
+
+    spread_vector = index_base - thumb_base
+    reach_vector = (
+        0.5 * (thumb_base + index_base) - wrist
+    )
+
+    spread = float(np.linalg.norm(spread_vector))
+    reach = float(np.linalg.norm(reach_vector))
+
+    # 拒绝不符合真实手掌尺度的几何形状。
+    if not 0.015 <= spread <= 0.14:
+        return previous
+
+    if not 0.025 <= reach <= 0.20:
+        return previous
+
+    x_axis = _normalize(spread_vector)
     if x_axis is None:
         return previous
-    arm = 0.5 * (thumb_base + index_base) - wrist
-    y_axis = _normalize(arm - float(np.dot(arm, x_axis)) * x_axis)
+
+    y_axis = _normalize(
+        reach_vector
+        - float(np.dot(reach_vector, x_axis)) * x_axis
+    )
     if y_axis is None:
         return previous
+
     z_axis = _normalize(np.cross(x_axis, y_axis))
     if z_axis is None:
         return previous
-    y_axis = _normalize(np.cross(z_axis, x_axis))
-    rotation = np.column_stack([x_axis, y_axis, z_axis])
-    if previous is not None and float(np.dot(previous[:, 0], rotation[:, 0])) < 0:
-        rotation[:, 0] *= -1
-        rotation[:, 1] *= -1
-        rotation[:, 2] = np.cross(rotation[:, 0], rotation[:, 1])
-    return rotation
 
+    y_axis = _normalize(np.cross(z_axis, x_axis))
+
+    rotation = np.column_stack(
+        [x_axis, y_axis, z_axis]
+    )
+
+    if previous is not None:
+        # 所有保持右手坐标系的等价符号组合中，
+        # 选择与上一帧旋转最接近的一组。
+        flips = (
+            np.diag([1.0, 1.0, 1.0]),
+            np.diag([-1.0, -1.0, 1.0]),
+            np.diag([-1.0, 1.0, -1.0]),
+            np.diag([1.0, -1.0, -1.0]),
+        )
+
+        candidates = [
+            rotation @ flip
+            for flip in flips
+        ]
+
+        rotation = max(
+            candidates,
+            key=lambda candidate: np.trace(
+                previous.T @ candidate
+            ),
+        )
+
+    return rotation
 
 class MediaPipeDetector:
     """Optional detector kept separate so conversion also works with supplied landmarks."""
@@ -305,8 +470,8 @@ class MediaPipeDetector:
 class HandProcessor:
     def __init__(
         self,
-        close_ratio: float = 0.55,
-        open_ratio: float = 0.72,
+        close_ratio: float = 0.85,
+        open_ratio: float = 1.00,
         smooth_window: int = 5,
         patch_radius: int = 3,
         min_valid_pixels: int = 4,
@@ -369,8 +534,15 @@ class HandProcessor:
             midpoint = 0.5 * (points_world[0] + points_world[1])
             palm_size = float(np.linalg.norm(points_world[11] - points_world[5]))
             pinch_distance = float(np.linalg.norm(points_world[0] - points_world[1]))
-            ratio = pinch_distance / palm_size if palm_size > 0.01 else np.inf
-            raw_grasp = ratio < (self.open_ratio if history["grasp"] else self.close_ratio)
+            ratio_3d = pinch_distance / palm_size if palm_size > 0.01 else np.inf
+            # MediaPipe's relative 3D hand model compressed the open aperture in
+            # the fixed-camera data (open frames were still around 0.83), making
+            # open and grasped states overlap. The image-space ratio cleanly
+            # separates them and remains invariant to image scale.
+            ratio_2d = _normalized_pinch_ratio_2d(detection.landmarks_2d)
+            raw_grasp = ratio_2d < (
+                self.open_ratio if history["grasp"] else self.close_ratio
+            )
             history["votes"].append(bool(raw_grasp))
             grasp = sum(history["votes"]) * 2 >= len(history["votes"])
 
@@ -423,7 +595,9 @@ class HandProcessor:
                 "confidence": pose_confidence,
                 "detection_confidence": float(detection.confidence),
                 "grasp_state": int(grasp),
-                "grasp_ratio": None if not np.isfinite(ratio) else float(ratio),
+                "grasp_ratio": None if not np.isfinite(ratio_2d) else float(ratio_2d),
+                "grasp_ratio_2d": None if not np.isfinite(ratio_2d) else float(ratio_2d),
+                "grasp_ratio_3d": None if not np.isfinite(ratio_3d) else float(ratio_3d),
                 "depth_keypoints_valid": quality["depth_hits"],
                 "depth_palm_keypoints_valid": quality["palm_depth_hits"],
                 "wrist_pose": list_of(wrist_pose_cam),

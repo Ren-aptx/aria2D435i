@@ -1,6 +1,7 @@
 import numpy as np
 
 from realsense_humanego.hands import (
+    _normalized_pinch_ratio_2d,
     DetectedHand,
     HandProcessor,
     optimize_hand_sequence,
@@ -8,6 +9,17 @@ from realsense_humanego.hands import (
     recover_keypoints_rgbd,
     remap_mediapipe_to_aria,
 )
+
+
+def test_2d_pinch_ratio_separates_open_and_closed_hand_apertures():
+    points = np.zeros((21, 2), dtype=np.float64)
+    points[0] = [10.0, 10.0]   # wrist
+    points[9] = [10.0, 30.0]   # middle MCP: palm scale = 20 px
+    points[4], points[8] = [3.0, 30.0], [17.0, 30.0]
+    assert np.isclose(_normalized_pinch_ratio_2d(points), 0.7)
+
+    points[4], points[8] = [-2.0, 30.0], [22.0, 30.0]
+    assert np.isclose(_normalized_pinch_ratio_2d(points), 1.2)
 
 
 def test_patch_depth_uses_neighborhood_median_and_range_filter():
@@ -57,7 +69,13 @@ def test_temporal_fallback_transforms_world_point_into_current_camera():
         depth[v, u] = 0.8
     intrinsics = np.array([[100.0, 0.0, 10.0], [0.0, 100.0, 10.0], [0.0, 0.0, 1.0]])
     previous_world = np.zeros((21, 3), dtype=np.float64)
-    previous_world[:, 2] = 1.0
+    # Keep the observed joints consistent with the current RGB-D points so
+    # this fixture exercises temporal hole filling rather than the sequence
+    # jump-rejection guard.
+    previous_world[:20, 0] = (points[:20, 0] - 10.0) * 0.8 / 100.0 + 0.5
+    previous_world[:20, 1] = (points[:20, 1] - 10.0) * 0.8 / 100.0
+    previous_world[:20, 2] = 0.8
+    previous_world[20, 2] = 1.0
     previous_world[20] = [0.5, 0.0, 1.0]
     current_c2w = np.eye(4)
     current_c2w[0, 3] = 0.5

@@ -1,24 +1,25 @@
-# D435i → HumanEgo native bridge
+# Fixed D435i → HumanEgo RGB-D bridge
 
-This repository implements the plan in `chatGPT.md` without ROS1/ROS2 and without
-pretending that a D435i capture is an Aria VRS/MPS recording.
+This repository records a table/stand-mounted D435i and generates HumanEgo's existing
+base-data contract without ROS, IMU, IR stereo, or ORB-SLAM3. The RGB camera frame is
+the world frame by default, so every frame has the same `c2w` and no estimated-pose
+jitter is injected into hand or object coordinates.
 
-The native C++14 executable captures color, raw/aligned depth, both IR cameras and
-IMU samples, calls ORB-SLAM3 `TrackStereo()` directly, and writes a RGB-camera `c2w`
-trajectory. The Python converter interpolates that trajectory onto RGB timestamps and
-generates HumanEgo's existing compatibility contract:
+The default data path is:
+
+```text
+D435i RGB + Depth → aligned RGB-D → constant c2w → RGB-D hands/objects → HumanEgo
+```
+
+The old moving-camera Stereo-Inertial recorder remains available behind an explicit
+CMake option, but it is not part of the fixed-camera build or workflow.
 
 ```text
 SESSION/
 ├── raw/
-│   ├── sample.db3
 │   ├── calibration.json
-│   ├── orbslam3_runtime.yaml
 │   ├── timestamps.csv
-│   ├── imu.csv
-│   ├── trajectory_left_ir.txt
-│   ├── trajectory_rgb.txt
-│   ├── rgb/ depth/ aligned_depth/ ir_left/ ir_right/
+│   ├── rgb/ depth/ aligned_depth/
 │   └── capture_summary.json
 └── preprocess/
     ├── aria_cam_rgb_config.json
@@ -34,65 +35,60 @@ SESSION/
         └── aria_phases.json
 ```
 
-The `aria_` prefix is retained only because `DatasetGen.py` treats those names as an
-interface. Every camera JSON also records `source: realsense_d435i`.
+The `aria_` prefix is retained only because HumanEgo treats those names as an interface.
+`aria_slam.json` is intentionally still generated, but it describes a static camera:
+constant pose, zero deltas, and zero linear/angular speed.
 
-## 1. Build ORB-SLAM3 and the recorder
+## 1. Build the RGB-D recorder
 
-The specified `/home/tenda/ORB_SLAM3` checkout currently contains source only. Build it
-once (including extracting its vocabulary), then build this project:
+Only librealsense2 and OpenCV are needed for the default recorder:
 
 ```bash
-cd /home/tenda/ORB_SLAM3
-tar -xf Vocabulary/ORBvoc.txt.tar.gz -C Vocabulary
-./build.sh
-
 cd /home/tenda/aria2D435i
-cmake -S . -B build -DORB_SLAM3_ROOT=/home/tenda/ORB_SLAM3 \
-  -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
 ```
 
-The bridge itself uses C++14. ORB-SLAM3 remains its native C++ library; no ROS wrapper
-is built or used. For a prebuilt checkout elsewhere, set `ORB_SLAM3_ROOT` accordingly.
+To build the legacy moving-camera recorder too, configure with
+`-DBUILD_ORB_SLAM_RECORDER=ON -DORB_SLAM3_ROOT=/path/to/ORB_SLAM3`.
 
 ## 2. Record
 
 The default serial is the attached D435i, `261622079447`:
 
 ```bash
-./build/RealSenseStereoInertial \
-  --vocabulary /home/tenda/ORB_SLAM3/Vocabulary/ORBvoc.txt \
+./build/RealSenseRGBDRecorder \
   --output /absolute/path/to/data/serve_bread/realsense/rs_serve_bread_000
 ```
 
-Press Ctrl+C to stop. Add `--max-frames 300` for a bounded test or `--no-bag` (also
-available as `--no-recording`) if the raw stream recording is not wanted. The installed
-ROS2 librealsense writes that recording as `raw/sample.db3`; its writer rejects the old
-`.bag` suffix. The configured streams are color 1280×720@30,
-depth/left IR/right IR 848×480@30, gyro 200 Hz and accelerometer 200 Hz. The projected
-IR emitter is disabled for stereo feature tracking. Runtime factory calibration is
-written both to `calibration.json` and to the generated ORB-SLAM3 YAML. The infrared
-pair is declared as `Camera.type: Rectified` with the factory baseline, because D435i
-already supplies rectified stereo frames.
-
-At build time this project compiles a local compatibility copy of ORB-SLAM3's
-`Settings.cc`, initializing its camera pointers before the `Rectified` configuration is
-printed. This fixes the startup segmentation fault without modifying the external
-`/home/tenda/ORB_SLAM3` checkout or changing the camera geometry.
-
-The capture queue is bounded. If disk or SLAM processing cannot keep up,
-`capture_summary.json` reports dropped frames instead of silently growing memory.
+Press Ctrl+C to stop, or use `--max-frames 600`. The recorder saves color, raw depth,
+and depth aligned to color at 848×480@30. It discards 60 warm-up frames by default
+(`--warmup-frames N`) and refuses to overwrite a session containing `timestamps.csv`.
+Use `--record` only when an additional librealsense stream recording is useful for
+diagnostics; it is not needed by HumanEgo.
 
 ## 3. Export HumanEgo base data
 
-For camera/SLAM/phases and explicit null hands:
+Fixed-camera export is the CLI default. It does not require `trajectory_rgb.txt`:
 
 ```bash
 python3 -m realsense_humanego \
   --session /absolute/path/to/rs_serve_bread_000 \
-  --hands none
+  --hands mediapipe \
+  --manip-start 120 --manip-end 450 --finished-start 510
 ```
+
+Manual phase boundaries use exported-frame indices and are inclusive. Frames outside
+the manipulation/finished windows are TRANSITION. This is the recommended mode while
+validating geometry and masks. Without manual boundaries, fixed-camera phase detection
+uses optimized hand velocity: sufficiently long stable-hand runs are MANIPULATION,
+reach/withdrawal or missing-hand frames are TRANSITION, and the final
+`--finish-frames` are FINISHED. Fixed mode never emits FORWARD or ROTATE.
+
+By default `c2w` is identity, making RGB-camera coordinates world coordinates. To use a
+fixed calibrated world transform, pass `--fixed-c2w transform.json`; the file may be a
+4×4 JSON array or `{\"c2w\": [[...]]}`. The transform is checked for a valid rigid
+rotation before export.
 
 With MediaPipe installed, `--hands mediapipe` detects hands and lifts every keypoint
 with aligned depth. It uses a center-guided 7×7 depth cluster, requires at least eight
@@ -106,6 +102,11 @@ after this pass so hand motion can mark manipulation transitions:
 python3 -m pip install -e '.[hands]'
 realsense-humanego --session /absolute/path/to/session --hands mediapipe
 ```
+
+Grasp labels use the image-space thumb-tip/index-tip distance normalized by wrist-to-middle-
+MCP palm length. The default hysteresis closes below `0.85` and re-opens above `1.00`;
+override these with `--grasp-close-ratio` and `--grasp-open-ratio` only after checking the
+recording's ratio distribution.
 
 For detections produced in another environment, use `--hands landmarks --landmarks DIR`.
 Each `DIR/000000.json` (source-frame numbering) has this form; points may be pixels or
@@ -126,11 +127,10 @@ normalized coordinates:
 Both landmark arrays must contain 21 rows. Missing detections still produce
 `aria_hands.json` with null left/right entries, so frame discovery remains deterministic.
 
-SLAM output is interpreted as `timestamp tx ty tz qx qy qz qw`. Translation is linearly
-interpolated and rotation uses quaternion Slerp. Frames outside the tracked interval or
-inside a gap larger than `--max-pose-gap` are dropped and reindexed; they are never filled
-by copying the preceding pose. The original index and drop reasons are retained in
-`realsense_manifest.json`.
+For legacy moving-camera captures, pass `--slam-camera`. SLAM output is then interpreted
+as `timestamp tx ty tz qx qy qz qw`; translation is linearly interpolated and rotation
+uses quaternion Slerp. Frames outside the tracked interval or inside a gap larger than
+`--max-pose-gap` are dropped and reindexed.
 
 ## 4. Run the existing HumanEgo object pipeline
 
@@ -147,6 +147,12 @@ python3 scripts/run_humanego_downstream.py \
   --session /absolute/path/to/rs_serve_bread_000 \
   --task serve_bread
 ```
+
+Like the official pipeline, a completed run exports two videos by default under
+`SESSION/preprocess/vis/`: `aria_vis.mp4` shows RGB hand tracking, OPEN/CLOSED state,
+pinch ratio, and phase; `visualkpts_vis.mp4` shows the arm-inpainted training view with
+the virtual gripper and object keypoints. Video writing is streamed to keep memory bounded.
+Pass `--no-video` to disable both.
 
 Use `--from-stage`/`--to-stage` to resume or run a subset. Model weights and task prompts
 remain the responsibility of the existing HumanEgo configuration. No policy/training code

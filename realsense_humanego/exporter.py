@@ -32,11 +32,13 @@ from .hands import (
 class ExportConfig:
     session: Path
     trajectory: Optional[Path] = None
+    fixed_camera: bool = True
+    fixed_c2w: Optional[np.ndarray] = None
     max_pose_gap_s: float = 0.20
     hand_mode: str = "auto"
     landmarks_dir: Optional[Path] = None
-    close_ratio: float = 0.55
-    open_ratio: float = 0.72
+    close_ratio: float = 0.85
+    open_ratio: float = 1.00
     grasp_smooth_window: int = 5
     depth_patch_radius: int = 3
     min_valid_depth_pixels: int = 4
@@ -56,6 +58,9 @@ class ExportConfig:
     stop_angular_rps: float = 0.15
     rotate_angular_rps: float = 0.35
     rotate_max_linear_mps: float = 0.15
+    manip_start: Optional[int] = None
+    manip_end: Optional[int] = None
+    finished_start: Optional[int] = None
 
 
 @dataclass
@@ -93,10 +98,30 @@ def _require_file(path: Path) -> Path:
 def _load_calibration(raw: Path) -> Dict:
     with _require_file(raw / "calibration.json").open("r", encoding="utf-8") as stream:
         calibration = json.load(stream)
-    for key in ("depth_scale_m", "color", "T_color_to_left_ir"):
+    for key in ("depth_scale_m", "color"):
         if key not in calibration:
             raise KeyError(f"calibration.json is missing {key!r}")
     return calibration
+
+
+def _fixed_camera_transform(config: ExportConfig) -> np.ndarray:
+    transform = (
+        np.eye(4, dtype=np.float64)
+        if config.fixed_c2w is None
+        else np.asarray(config.fixed_c2w, dtype=np.float64)
+    )
+    if transform.shape != (4, 4):
+        raise ValueError("fixed_c2w must have shape (4, 4)")
+    if not np.all(np.isfinite(transform)):
+        raise ValueError("fixed_c2w must contain only finite values")
+    if not np.allclose(transform[3], [0.0, 0.0, 0.0, 1.0], atol=1e-8):
+        raise ValueError("fixed_c2w must be a homogeneous transform")
+    rotation = transform[:3, :3]
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-5):
+        raise ValueError("fixed_c2w rotation must be orthonormal")
+    if not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-5):
+        raise ValueError("fixed_c2w rotation must have determinant +1")
+    return transform.copy()
 
 
 def _source_path(raw: Path, value: str, fallback_directory: str, index: int) -> Path:
@@ -215,6 +240,9 @@ def _phase_modes(
     config: ExportConfig,
     hand_documents: Optional[List[Dict]] = None,
 ) -> List[int]:
+    if config.fixed_camera:
+        return _fixed_camera_phase_modes(frames, config, hand_documents)
+
     stopped_flags = np.asarray([
         frame.linear_speed < config.stop_linear_mps
         and frame.angular_speed < config.stop_angular_rps
@@ -274,6 +302,77 @@ def _phase_modes(
     return modes
 
 
+def _fixed_camera_phase_modes(
+    frames: List[ExportFrame],
+    config: ExportConfig,
+    hand_documents: Optional[List[Dict]] = None,
+) -> List[int]:
+    """Segment a fixed-camera sequence without using camera kinematics.
+
+    Fixed-camera recordings use only HumanEgo's manipulation (0), transition
+    (3), and finished (4) modes. Explicit frame boundaries take precedence;
+    otherwise stable detected-hand motion defines manipulation frames.
+    """
+    count = len(frames)
+    if count == 0:
+        return []
+
+    has_manual_window = any(value is not None for value in (
+        config.manip_start, config.manip_end, config.finished_start
+    ))
+    if has_manual_window:
+        if config.manip_start is None or config.manip_end is None:
+            raise ValueError("fixed-camera manual phases require manip_start and manip_end")
+        start = int(config.manip_start)
+        end = int(config.manip_end)
+        if not 0 <= start <= end < count:
+            raise ValueError(
+                f"manual manipulation window [{start}, {end}] is outside 0..{count - 1}"
+            )
+        modes = [3] * count
+        modes[start:end + 1] = [0] * (end - start + 1)
+        if config.finished_start is not None:
+            finish = int(config.finished_start)
+            if not end < finish < count:
+                raise ValueError(
+                    f"finished_start must be after manip_end and inside 0..{count - 1}"
+                )
+        else:
+            finish = max(end + 1, count - max(0, config.finish_frames))
+        for index in range(finish, count):
+            modes[index] = 4
+        return modes
+
+    modes = [3] * count
+    stable = np.zeros(count, dtype=bool)
+    if hand_documents is not None:
+        for index, document in enumerate(hand_documents[:count]):
+            speeds = []
+            for side in ("hand_r", "hand_l"):
+                hand = document.get(side)
+                velocity = None if hand is None else hand.get(
+                    "midpoint_lin_vel_opt_world"
+                )
+                if velocity is None:
+                    continue
+                speed = float(np.linalg.norm(np.asarray(velocity, dtype=np.float64)))
+                if np.isfinite(speed):
+                    speeds.append(speed)
+            stable[index] = bool(speeds) and max(speeds) < config.hand_motion_mps
+
+    # Suppress isolated detector/velocity hits. Only continuous stable-hand
+    # runs long enough to be intentional manipulation become mode 0.
+    minimum = max(1, config.hand_stable_frames)
+    for start, end in _continuous_true_runs(stable):
+        if end - start >= minimum:
+            modes[start:end] = [0] * (end - start)
+
+    finish = max(0, count - max(0, config.finish_frames))
+    for index in range(finish, count):
+        modes[index] = 4
+    return modes
+
+
 def _continuous_true_runs(values: np.ndarray) -> List[Tuple[int, int]]:
     result: List[Tuple[int, int]] = []
     start = None
@@ -307,38 +406,69 @@ def _select_hand_source(config: ExportConfig):
 
 
 def export_session(config: ExportConfig) -> Dict:
+    if config.fixed_camera and config.trajectory is not None:
+        raise ValueError("trajectory cannot be used with fixed_camera")
+    if not config.fixed_camera and any(value is not None for value in (
+        config.fixed_c2w, config.manip_start, config.manip_end, config.finished_start
+    )):
+        raise ValueError("fixed-camera transform/phase options require fixed_camera=True")
     session = Path(config.session).resolve()
     raw = _raw_directory(session)
     calibration = _load_calibration(raw)
     source_frames = _load_source_frames(raw)
-    trajectory_path = Path(config.trajectory) if config.trajectory else raw / "trajectory_rgb.txt"
-    poses = load_tum_trajectory(_require_file(trajectory_path))
-    if not poses:
-        raise ValueError(f"trajectory contains no valid poses: {trajectory_path}")
-
     frames: List[ExportFrame] = []
     dropped: List[Dict] = []
-    for source in source_frames:
-        c2w = interpolate_pose(poses, source.rgb_timestamp_ns * 1e-9, config.max_pose_gap_s)
-        if c2w is None:
-            dropped.append({"source_idx": source.source_idx, "reason": "invalid_or_missing_pose"})
-            continue
-        frames.append(ExportFrame(
-            idx=len(frames), source=source, c2w=c2w,
-            t_world=c2w[:3, 3].copy(), rpy_rad=rotation_to_rpy_zyx(c2w[:3, :3]),
-        ))
+    trajectory_path: Optional[Path] = None
+    if config.fixed_camera:
+        c2w = _fixed_camera_transform(config)
+        rpy = rotation_to_rpy_zyx(c2w[:3, :3])
+        for source in source_frames:
+            frames.append(ExportFrame(
+                idx=len(frames), source=source, c2w=c2w.copy(),
+                t_world=c2w[:3, 3].copy(), rpy_rad=rpy.copy(),
+                yaw_unwrapped_rad=float(rpy[2]),
+            ))
+    else:
+        trajectory_path = (
+            Path(config.trajectory) if config.trajectory else raw / "trajectory_rgb.txt"
+        )
+        poses = load_tum_trajectory(_require_file(trajectory_path))
+        if not poses:
+            raise ValueError(f"trajectory contains no valid poses: {trajectory_path}")
+        for source in source_frames:
+            c2w = interpolate_pose(
+                poses, source.rgb_timestamp_ns * 1e-9, config.max_pose_gap_s
+            )
+            if c2w is None:
+                dropped.append({
+                    "source_idx": source.source_idx,
+                    "reason": "invalid_or_missing_pose",
+                })
+                continue
+            frames.append(ExportFrame(
+                idx=len(frames), source=source, c2w=c2w,
+                t_world=c2w[:3, 3].copy(),
+                rpy_rad=rotation_to_rpy_zyx(c2w[:3, :3]),
+            ))
     if not frames:
         raise ValueError(
             "no RGB frame has a valid bracketing SLAM pose; check time domains and max_pose_gap_s"
         )
-    _calculate_kinematics(frames)
+    if not config.fixed_camera:
+        _calculate_kinematics(frames)
 
     intrinsics = _camera_matrix(calibration)
     color = calibration["color"]
     distortion = np.asarray(color.get("coeffs", [0, 0, 0, 0, 0]), dtype=np.float64)
-    color_to_left = np.asarray(calibration["T_color_to_left_ir"], dtype=np.float64)
-    if color_to_left.shape != (4, 4):
-        raise ValueError("T_color_to_left_ir must have shape (4, 4)")
+    color_to_device = np.asarray(
+        calibration.get(
+            "T_color_to_device",
+            calibration.get("T_color_to_left_ir", np.eye(4)),
+        ),
+        dtype=np.float64,
+    )
+    if color_to_device.shape != (4, 4):
+        raise ValueError("T_color_to_device must have shape (4, 4)")
     depth_scale = float(calibration["depth_scale_m"])
     timestamps = np.asarray([frame.source.rgb_timestamp_ns for frame in frames], dtype=np.int64)
     median_dt = float(np.median(np.diff(timestamps))) * 1e-9 if len(frames) > 1 else 1 / 30
@@ -362,6 +492,8 @@ def export_session(config: ExportConfig) -> Dict:
     first_t = frames[0].t_world
     first_rpy_deg = np.degrees(frames[0].rpy_rad)
     mode_names = {0: "STOP", 1: "FORWARD", 2: "ROTATE", 3: "TRANSITION", 4: "FINISHED"}
+    if config.fixed_camera:
+        mode_names[0] = "MANIPULATION"
     hand_documents: List[Dict] = []
 
     try:
@@ -373,7 +505,7 @@ def export_session(config: ExportConfig) -> Dict:
             shutil.copy2(frame.source.rgb_path, rgb_target)
             shutil.copy2(frame.source.aligned_depth_path, depth_target)
 
-            left_to_world = frame.c2w @ np.linalg.inv(color_to_left)
+            device_to_world = frame.c2w @ np.linalg.inv(color_to_device)
             camera_document = {
                 "idx": frame.idx,
                 "source_idx": frame.source.source_idx,
@@ -385,8 +517,8 @@ def export_session(config: ExportConfig) -> Dict:
                 "k": intrinsics.tolist(),
                 "d": distortion.tolist(),
                 "c2w": frame.c2w.tolist(),
-                "c2d": color_to_left.tolist(),
-                "d2w": left_to_world.tolist(),
+                "c2d": color_to_device.tolist(),
+                "d2w": device_to_world.tolist(),
                 "rgb_path": str(Path("preprocess/all_data") / f"{frame.idx:05d}" / "rgb.png"),
                 "fps": fps,
                 "pose_valid": True,
@@ -460,6 +592,24 @@ def export_session(config: ExportConfig) -> Dict:
         "right": sum(document["hand_r"] is not None for document in hand_documents),
         "left": sum(document["hand_l"] is not None for document in hand_documents),
     }
+    grasp_counts = {
+        "right": sum(
+            document["hand_r"] is not None
+            and int(document["hand_r"].get("grasp_state", 0)) == 1
+            for document in hand_documents
+        ),
+        "left": sum(
+            document["hand_l"] is not None
+            and int(document["hand_l"].get("grasp_state", 0)) == 1
+            for document in hand_documents
+        ),
+    }
+    for side in ("right", "left"):
+        if hand_counts[side] and not grasp_counts[side]:
+            warnings.warn(
+                f"{side} hand has {hand_counts[side]} observations but zero closed-grasp "
+                "labels; inspect grasp_ratio_2d before training"
+            )
     for frame, mode, hands_document in zip(frames, phases, hand_documents):
         frame_dir = all_data / f"{frame.idx:05d}"
         _json_dump(frame_dir / "aria_hands.json", hands_document)
@@ -486,8 +636,9 @@ def export_session(config: ExportConfig) -> Dict:
         "w": int(color["width"]),
         "k": intrinsics.tolist(),
         "d": distortion.tolist(),
-        "c2d": color_to_left.tolist(),
+        "c2d": color_to_device.tolist(),
         "source": "realsense_d435i",
+        "camera_mode": "fixed" if config.fixed_camera else "slam",
     })
     windows = _phase_windows(phases)
     _json_dump(preprocess / "aria_phases_results.json", {
@@ -496,16 +647,30 @@ def export_session(config: ExportConfig) -> Dict:
         "duration_s": (timestamps[-1] - timestamps[0]) * 1e-9 if len(frames) > 1 else 0.0,
         "stage_window_check": {"windows": windows},
         "source": "realsense_d435i",
+        "phase_source": (
+            "manual_fixed_camera"
+            if config.fixed_camera and config.manip_start is not None
+            else "hand_fixed_camera" if config.fixed_camera else "camera_and_hand_kinematics"
+        ),
     })
     manifest = {
         "source": "realsense_d435i",
         "source_frames": len(source_frames),
         "exported_frames": len(frames),
         "dropped_frames": dropped,
+        "camera_mode": "fixed" if config.fixed_camera else "slam",
         "max_pose_gap_s": config.max_pose_gap_s,
-        "trajectory": str(trajectory_path.resolve()),
+        "trajectory": None if trajectory_path is None else str(trajectory_path.resolve()),
+        "fixed_c2w": frames[0].c2w.tolist() if config.fixed_camera else None,
         "hand_source": hand_source,
         "hand_observations": hand_counts,
+        "closed_grasp_observations": grasp_counts,
+        "grasp_detection": {
+            "ratio": "2d_thumb_index_over_wrist_middle_mcp",
+            "close_below": config.close_ratio,
+            "open_above": config.open_ratio,
+            "vote_window": config.grasp_smooth_window,
+        },
         "hand_optimization": optimization_stats,
     }
     _json_dump(preprocess / "realsense_manifest.json", manifest)

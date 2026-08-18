@@ -1,4 +1,13 @@
-from scripts.run_humanego_downstream import clear_invalidated_results
+from scripts.run_humanego_downstream import clear_invalidated_results, parser
+
+
+def test_downstream_exports_two_videos_by_default():
+    args = parser().parse_args(["--session", "/tmp/session", "--task", "serve_bread"])
+    assert args.video is True
+    args = parser().parse_args([
+        "--session", "/tmp/session", "--task", "serve_bread", "--no-video"
+    ])
+    assert args.video is False
 
 
 def test_clear_invalidated_results_preserves_completed_upstream_stage(tmp_path):

@@ -5,13 +5,25 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc imgcodecs calib3d)
+find_package(realsense2 REQUIRED)
+
+add_executable(RealSenseRGBDRecorder cpp/RealSenseRGBDRecorder.cc)
+target_compile_options(RealSenseRGBDRecorder PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(RealSenseRGBDRecorder PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(RealSenseRGBDRecorder PRIVATE
+  ${OpenCV_LIBS}
+  realsense2::realsense2
+)
+
+option(BUILD_ORB_SLAM_RECORDER
+  "Build the legacy moving-camera Stereo-Inertial ORB-SLAM3 recorder" OFF)
+
+if(BUILD_ORB_SLAM_RECORDER)
 set(ORB_SLAM3_ROOT "/home/tenda/ORB_SLAM3" CACHE PATH
     "Path to a built ORB-SLAM3 source tree")
-
-find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc imgcodecs calib3d)
 find_package(Eigen3 3.1 REQUIRED)
 find_package(Pangolin REQUIRED)
-find_package(realsense2 REQUIRED)
 
 set(ORB_SLAM3_LIBRARY "${ORB_SLAM3_ROOT}/lib/libORB_SLAM3.so")
 set(DBOW2_LIBRARY "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib/libDBoW2.so")
@@ -146,9 +158,10 @@ function(configure_orb_target target)
 endfunction()
 
 configure_orb_target(RealSenseStereoInertial)
+endif()
 
 include(CTest)
-if(BUILD_TESTING)
+if(BUILD_TESTING AND BUILD_ORB_SLAM_RECORDER)
   add_executable(ORBSettingsSmoke tests/orb_settings_smoke.cc)
   configure_orb_target(ORBSettingsSmoke)
   if(EXISTS "${ORB_SLAM3_VOCABULARY}")

@@ -63,9 +63,7 @@ CMAKE_BINARY_DIR = /home/tenda/aria2D435i/build
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: CMakeFiles/ORBSettingsCompat.dir/all
-all: CMakeFiles/RealSenseStereoInertial.dir/all
-all: CMakeFiles/ORBSettingsSmoke.dir/all
+all: CMakeFiles/RealSenseRGBDRecorder.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -73,8 +71,7 @@ preinstall:
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: CMakeFiles/ORBSettingsCompat.dir/clean
-clean: CMakeFiles/RealSenseStereoInertial.dir/clean
+clean: CMakeFiles/RealSenseRGBDRecorder.dir/clean
 clean: CMakeFiles/Experimental.dir/clean
 clean: CMakeFiles/Nightly.dir/clean
 clean: CMakeFiles/Continuous.dir/clean
@@ -103,60 +100,33 @@ clean: CMakeFiles/ContinuousTest.dir/clean
 clean: CMakeFiles/ContinuousCoverage.dir/clean
 clean: CMakeFiles/ContinuousMemCheck.dir/clean
 clean: CMakeFiles/ContinuousSubmit.dir/clean
-clean: CMakeFiles/ORBSettingsSmoke.dir/clean
 .PHONY : clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/ORBSettingsCompat.dir
+# Target rules for target CMakeFiles/RealSenseRGBDRecorder.dir
 
 # All Build rule for target.
-CMakeFiles/ORBSettingsCompat.dir/all:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/tenda/aria2D435i/build/CMakeFiles --progress-num=1 "Built target ORBSettingsCompat"
-.PHONY : CMakeFiles/ORBSettingsCompat.dir/all
+CMakeFiles/RealSenseRGBDRecorder.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseRGBDRecorder.dir/build.make CMakeFiles/RealSenseRGBDRecorder.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseRGBDRecorder.dir/build.make CMakeFiles/RealSenseRGBDRecorder.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/tenda/aria2D435i/build/CMakeFiles --progress-num=1,2 "Built target RealSenseRGBDRecorder"
+.PHONY : CMakeFiles/RealSenseRGBDRecorder.dir/all
 
 # Build rule for subdir invocation for target.
-CMakeFiles/ORBSettingsCompat.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/tenda/aria2D435i/build/CMakeFiles 1
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/ORBSettingsCompat.dir/all
+CMakeFiles/RealSenseRGBDRecorder.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/tenda/aria2D435i/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/RealSenseRGBDRecorder.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/tenda/aria2D435i/build/CMakeFiles 0
-.PHONY : CMakeFiles/ORBSettingsCompat.dir/rule
+.PHONY : CMakeFiles/RealSenseRGBDRecorder.dir/rule
 
 # Convenience name for target.
-ORBSettingsCompat: CMakeFiles/ORBSettingsCompat.dir/rule
-.PHONY : ORBSettingsCompat
+RealSenseRGBDRecorder: CMakeFiles/RealSenseRGBDRecorder.dir/rule
+.PHONY : RealSenseRGBDRecorder
 
 # clean rule for target.
-CMakeFiles/ORBSettingsCompat.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsCompat.dir/build.make CMakeFiles/ORBSettingsCompat.dir/clean
-.PHONY : CMakeFiles/ORBSettingsCompat.dir/clean
-
-#=============================================================================
-# Target rules for target CMakeFiles/RealSenseStereoInertial.dir
-
-# All Build rule for target.
-CMakeFiles/RealSenseStereoInertial.dir/all: CMakeFiles/ORBSettingsCompat.dir/all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/tenda/aria2D435i/build/CMakeFiles --progress-num=4,5 "Built target RealSenseStereoInertial"
-.PHONY : CMakeFiles/RealSenseStereoInertial.dir/all
-
-# Build rule for subdir invocation for target.
-CMakeFiles/RealSenseStereoInertial.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/tenda/aria2D435i/build/CMakeFiles 3
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/RealSenseStereoInertial.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/tenda/aria2D435i/build/CMakeFiles 0
-.PHONY : CMakeFiles/RealSenseStereoInertial.dir/rule
-
-# Convenience name for target.
-RealSenseStereoInertial: CMakeFiles/RealSenseStereoInertial.dir/rule
-.PHONY : RealSenseStereoInertial
-
-# clean rule for target.
-CMakeFiles/RealSenseStereoInertial.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseStereoInertial.dir/build.make CMakeFiles/RealSenseStereoInertial.dir/clean
-.PHONY : CMakeFiles/RealSenseStereoInertial.dir/clean
+CMakeFiles/RealSenseRGBDRecorder.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/RealSenseRGBDRecorder.dir/build.make CMakeFiles/RealSenseRGBDRecorder.dir/clean
+.PHONY : CMakeFiles/RealSenseRGBDRecorder.dir/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/Experimental.dir
@@ -885,32 +855,6 @@ ContinuousSubmit: CMakeFiles/ContinuousSubmit.dir/rule
 CMakeFiles/ContinuousSubmit.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ContinuousSubmit.dir/build.make CMakeFiles/ContinuousSubmit.dir/clean
 .PHONY : CMakeFiles/ContinuousSubmit.dir/clean
-
-#=============================================================================
-# Target rules for target CMakeFiles/ORBSettingsSmoke.dir
-
-# All Build rule for target.
-CMakeFiles/ORBSettingsSmoke.dir/all: CMakeFiles/ORBSettingsCompat.dir/all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsSmoke.dir/build.make CMakeFiles/ORBSettingsSmoke.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsSmoke.dir/build.make CMakeFiles/ORBSettingsSmoke.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/tenda/aria2D435i/build/CMakeFiles --progress-num=2,3 "Built target ORBSettingsSmoke"
-.PHONY : CMakeFiles/ORBSettingsSmoke.dir/all
-
-# Build rule for subdir invocation for target.
-CMakeFiles/ORBSettingsSmoke.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/tenda/aria2D435i/build/CMakeFiles 3
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/ORBSettingsSmoke.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/tenda/aria2D435i/build/CMakeFiles 0
-.PHONY : CMakeFiles/ORBSettingsSmoke.dir/rule
-
-# Convenience name for target.
-ORBSettingsSmoke: CMakeFiles/ORBSettingsSmoke.dir/rule
-.PHONY : ORBSettingsSmoke
-
-# clean rule for target.
-CMakeFiles/ORBSettingsSmoke.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ORBSettingsSmoke.dir/build.make CMakeFiles/ORBSettingsSmoke.dir/clean
-.PHONY : CMakeFiles/ORBSettingsSmoke.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

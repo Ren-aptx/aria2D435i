@@ -54,7 +54,9 @@ def _write_fixture(session: Path):
 def test_export_session_writes_humanego_contract_and_drops_invalid_pose(tmp_path):
     session = tmp_path / "session"
     _write_fixture(session)
-    manifest = export_session(ExportConfig(session=session, hand_mode="none"))
+    manifest = export_session(ExportConfig(
+        session=session, fixed_camera=False, hand_mode="none"
+    ))
     assert manifest["source_frames"] == 3
     assert manifest["exported_frames"] == 2
     assert manifest["dropped_frames"] == [
@@ -87,7 +89,63 @@ def test_phase_modes_use_optimized_hand_motion_for_transition():
             "hand_l": None,
         })
     config = ExportConfig(
-        session=Path("."), finish_frames=0, hand_stable_frames=2,
+        session=Path("."), fixed_camera=False, finish_frames=0, hand_stable_frames=2,
         hand_transition_frames=0,
     )
     assert _phase_modes(frames, config, documents) == [3, 3, 0, 0, 0, 0, 0, 0, 0]
+
+
+def test_fixed_camera_export_needs_no_trajectory_and_writes_static_slam(tmp_path):
+    session = tmp_path / "session"
+    _write_fixture(session)
+    (session / "raw" / "trajectory_rgb.txt").unlink()
+
+    manifest = export_session(ExportConfig(
+        session=session,
+        fixed_camera=True,
+        hand_mode="none",
+        manip_start=1,
+        manip_end=1,
+        finished_start=2,
+    ))
+
+    assert manifest["camera_mode"] == "fixed"
+    assert manifest["trajectory"] is None
+    assert manifest["exported_frames"] == 3
+    assert manifest["grasp_detection"]["ratio"] == "2d_thumb_index_over_wrist_middle_mcp"
+    assert manifest["closed_grasp_observations"] == {"right": 0, "left": 0}
+    for index, expected_mode in enumerate((3, 0, 4)):
+        frame = session / "preprocess" / "all_data" / f"{index:05d}"
+        camera = json.loads((frame / "aria_cam_rgb.json").read_text())
+        slam = json.loads((frame / "aria_slam.json").read_text())
+        phase = json.loads((frame / "aria_phases.json").read_text())
+        assert np.allclose(camera["c2w"], np.eye(4))
+        assert slam["t_world"] == [0.0, 0.0, 0.0]
+        assert slam["delta_t_world"] == [0.0, 0.0, 0.0]
+        assert slam["linear_speed_mps"] == 0.0
+        assert slam["angular_speed_rps"] == 0.0
+        assert phase["mode"] == expected_mode
+
+
+def test_fixed_camera_hand_phase_never_emits_navigation_modes():
+    source = SourceFrame(0, 0, 0, Path("rgb.png"), Path("depth.png"))
+    frames = [
+        ExportFrame(index, source, np.eye(4), np.zeros(3), np.zeros(3))
+        for index in range(8)
+    ]
+    speeds = (None, 0.3, 0.01, 0.02, 0.01, 0.4, None, None)
+    documents = [{
+        "hand_r": None if speed is None else {
+            "midpoint_lin_vel_opt_world": [speed, 0.0, 0.0]
+        },
+        "hand_l": None,
+    } for speed in speeds]
+    config = ExportConfig(
+        session=Path("."), fixed_camera=True, finish_frames=1,
+        hand_stable_frames=3,
+    )
+
+    modes = _phase_modes(frames, config, documents)
+
+    assert modes == [3, 3, 0, 0, 0, 3, 3, 4]
+    assert not ({1, 2} & set(modes))
